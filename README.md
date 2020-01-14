@@ -3,9 +3,9 @@
 This is a work in progress of a Sigplot data service (sds) that will provide some serverside data thining for sigplot applications. 
 
 #### Files currently in repo
-app.py - A flask web app the provides the sds 
-makedata.py - a utility used to make 2D data files for the purpose of testing
-sds.ipynb - a Juypter notebook for interacting and tests the SDS that can request data and plot it.
+* app.py - A flask web app the provides the sds
+* makedata.py - a utility used to make 2D data files for the purpose of testing
+* sds.ipynb - a Juypter notebook for interacting and tests the SDS that can request data and plot it.
 
 
 ## SDS 
