@@ -72,10 +72,9 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
             #For each section of transform, find the start and end element
             startelement = y*framesize+int(round(x*xelementsperoutput))
             if x!=(outxsize-1):
-                endelement = startelement+ int(numpy.ceil(xelementsperoutput))+1
+                endelement = startelement+ int(numpy.ceil(xelementsperoutput))
             else:
                 endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
-            
             
             if transform == "mean":
                 thinxdata.append(numpy.mean(datain[startelement:endelement]))
@@ -83,6 +82,10 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                 thinxdata.append(max(datain[startelement:endelement]))
             elif transform == "absmax" : 
                 thinxdata.append(max(numpy.absolute(datain[startelement:endelement])))
+            elif transform == "min" : 
+                thinxdata.append(min(datain[startelement:endelement]))
+            elif transform == "first" : 
+                thinxdata.append(datain[startelement])
             else:
                 print("Transform %s not supported" %(transform))
                 return
@@ -103,6 +106,10 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                 outdata.append(max(thinxdata[startelement:endelement:stridesize]))
             elif transform == "absmax" : 
                 outdata.append(max(numpy.absolute(thinxdata[startelement:endelement:stridesize])))
+            elif transform == "min" : 
+                outdata.append(min(datain[startelement:endelement]))
+            elif transform == "first" : 
+                outdata.append(datain[startelement])
             else:
                 print("Transform %s not supported" %(transform))
                 return
