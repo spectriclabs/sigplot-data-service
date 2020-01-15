@@ -31,7 +31,7 @@ class BasicTests(unittest.TestCase):
 ###############
  
     def test_basic(self):
-        filename = "../data/mydata_500_1000"
+        filename = "../mydata_SL_500_1000"
         x1 = 10 
         y1 = 10
         x2 = 300
@@ -46,7 +46,7 @@ class BasicTests(unittest.TestCase):
         self.assertEqual(len(response.data),outxsize*outysize*4)
 
     def test_whole_file(self):
-        filename = "../data/mydata_500_1000"
+        filename = "../mydata_SL_500_1000"
         x1 = 0 
         y1 = 0
         x2 = 500
@@ -69,7 +69,7 @@ class BasicTests(unittest.TestCase):
         self.assertEqual(filedata[500],data[500])
 
     def test_single_points(self):
-        filename = "../data/mydata_500_1000"
+        filename = "../mydata_SL_500_1000"
         framesize =500
         fileysize =1000
         atom_size = 4
@@ -85,7 +85,7 @@ class BasicTests(unittest.TestCase):
             self.assertEqual(filedata[point[1]*framesize+point[0]],data[0])
 
     def test_slice(self):
-        filename = "../data/mydata_500_1000"
+        filename = "../mydata_SL_500_1000"
         atom_size = 4
         framesize =500
         fileysize =1000
@@ -101,13 +101,10 @@ class BasicTests(unittest.TestCase):
 
         self.assertEqual(len(response.data),outxsize*outysize*atom_size)
         data = struct.unpack('i'*(len(response.data)/atom_size),response.data)
-        print("length data " , len(data))
 
         f = open(filename,"rb") 
         filedata = f.read(atom_size*framesize*fileysize)
         filedata = struct.unpack('i'*(framesize*fileysize),filedata)
-        print("length filedata " , len(filedata))
-        print(filedata[500],filedata[501])
 
         # Spot Check some point in the output slice. We are doing a 2X reduction so all points should be an average of two points from one line and two from the next line
         meandata = (filedata[0],filedata[1],filedata[500],filedata[501])
@@ -119,6 +116,37 @@ class BasicTests(unittest.TestCase):
         meandata = (filedata[1004],filedata[1005],filedata[1504],filedata[1505])
         self.assertEqual(int(numpy.mean(meandata)),data[7])
 
+    def test_slice_float_file(self):
+        filename = "../mydata_SF_500_1000"
+        atom_size = 4
+        framesize =500
+        fileysize =1000
+        x1 = 0 
+        y1 = 0
+        x2 = 10
+        y2 = 10
+        outxsize = 5
+        outysize = 5
+        transform = "mean"
+        response = self.app.get('/sds?filename=%s&x1=%i&y1=%i&x2=%i&y2=%i&outxsize=%i&outysize=%i&transform=%s' 
+                                %(filename,x1,y1,x2,y2,outxsize,outysize,transform))
+
+        self.assertEqual(len(response.data),outxsize*outysize*atom_size)
+        data = struct.unpack('f'*(len(response.data)/atom_size),response.data)
+
+        f = open(filename,"rb") 
+        filedata = f.read(atom_size*framesize*fileysize)
+        filedata = struct.unpack('f'*(framesize*fileysize),filedata)
+
+        # Spot Check some point in the output slice. We are doing a 2X reduction so all points should be an average of two points from one line and two from the next line
+        meandata = (filedata[0],filedata[1],filedata[500],filedata[501])
+        self.assertEqual(int(numpy.mean(meandata)),data[0])
+        meandata = (filedata[2],filedata[3],filedata[502],filedata[503])
+        self.assertEqual(int(numpy.mean(meandata)),data[1])
+        meandata = (filedata[8],filedata[9],filedata[508],filedata[509])
+        self.assertEqual(int(numpy.mean(meandata)),data[4])
+        meandata = (filedata[1004],filedata[1005],filedata[1504],filedata[1505])
+        self.assertEqual(int(numpy.mean(meandata)),data[7])
  
 if __name__ == "__main__":
     unittest.main()

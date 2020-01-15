@@ -5,42 +5,88 @@ import numpy
 
 app = Flask(__name__)
 
-def openbinaryfile(filename):
-    """ Simple function for opening a binary file. The file name is assumed to have a basename then two number seperated by underscores.
-        For example a file name of mydata_1000_2000 will parse to have a x size (framesize) of 1000 and a y value (number of frames) of 2000.
-        Need to add a way to get the data element size. At the moment this is hardcoded to 4 bytes"""
-    data_element_size = 4
-    f = open(filename,"rb")
-    (basename,filexsize,fileysize) = str.split(str(filename),"_")
-    filexsize = int(filexsize)
-    fileysize= int(fileysize)
-    return (filexsize,fileysize,data_element_size,f)
+class data_file():
 
-def slice_data_from_file(filename,x1,y1,x2,y2):
+    
+    """ Constructor takes byte array and metadata details and constructs data_list """
+    def __init__(self,file_ptr,file_format,framesize=1):
+       
+        self.file_ptr = file_ptr #File_ptr to start of data. If file has header, then set this to poing after header
+        self.framesize =1 # framesize for 2D data, default to 1 for 1D data
+        self.atom_size = 4 #Number of bytes of underlying atom as received or sent
+        self.data_element_size = 4 #Number of bytes of underlying data for each element. Twice atom_size for complex
+        self.complex = False # True for Complex Data. False for Scaler. Complex data assumed to have two basic elements for each element
+        self.struct_string = "f" # String for using python struct command to pack and unpack the data 
+        
+        
+        self.framesize = int(framesize)
+        if file_format[0] in ("C","c"):
+            self.complex = True
+        
+        if file_format[1] in ("F","f"):
+            self.atom_size = 4
+            self.struct_string = "f"
+        elif file_format[1] in ("I","i"):  
+            self.atom_size = 2
+            self.struct_string = "h"
+        elif file_format[1] in ("D","d"):  
+            self.atom_size = 8
+            self.struct_string = "d"
+        elif file_format[1] in ("L","l"):  
+            self.atom_size = 4
+            self.struct_string = "i"
+        elif file_format[1] in ("B","b"):  
+            self.atom_size = 1
+            self.struct_string = "h"
+        
+        if self.complex==True:
+            self.data_element_size = 2*self.atom_size
+
+    """ Returns data from file starting at first_element for length elements """
+    def get_data(self,first_element,length):
+        # Got to start element
+        self.file_ptr.seek(first_element*self.data_element_size)
+        #Read  elements
+        byte_data = self.file_ptr.read(length*self.data_element_size)
+        data= struct.unpack(self.struct_string*length,byte_data)
+        return data
+
+
+
+def openbinaryfile(filename):
+    """ Simple function for opening a binary file. The file name is assumed to have a basename,file_format, then two number seperated by underscores.
+        For example a file name of mydata_SL_1000_2000 will parse to have file_format of SL, a x size (framesize) of 1000 and a y value (number of frames) of 2000.
+        Returns a data_file object, which has a pointer to the file and the metadata in a class"""
+
+    f = open(filename,"rb")
+    try:
+        (basename,file_format,filexsize,fileysize) = str.split(str(filename),"_")
+    except ValueError:
+        raise Exception("Invalid binary File Name. Looking for <basename>_<file_forma>_<xsize>_<ysize>")
+    
+    file_data = data_file(f,file_format,framesize=filexsize)
+
+    return file_data
+
+def slice_data_from_file(file_data,x1,y1,x2,y2):
     """ Returns a 2D slice from a 2D file. Assumes that opening the file, will provide necessary meta data about the framesize and bytes per element. 
         A data points that represent the rectangle of data returned are specified in data elements.
         The returned data will always start with the lowest index point in the return file even if the first point isn't the lowest index point. 
         The return value is a list of numbers"""
 
-    # Opens up a file and get a reference to the file, the 2D file size and bytes per element are returned. This can later be replaced with reading other files as long as the the necessary metadat is also returned.    
-    filexsize,fileysize,data_element_size,f = openbinaryfile(filename)
-    data = ""
+
+    data = []
 
     ystart = min(y1,y2)
     xstart = min(x1,x2)
     ysize = abs(y1-y2)
     xsize = abs(x1-x2)
-
+    
     # For each needed line to match the ystart and ysize read xsize elements.
     for line in range(ystart,ystart+ysize):
-        # Got to start element
-        seekvalue = (line*filexsize+xstart)*data_element_size
-        f.seek(seekvalue)
-        #Read xsize elements
-        byte_data = f.read(xsize*data_element_size)
-        data+=byte_data
-
-    data = struct.unpack('i'*(xsize*ysize),data)
+        start = (line*file_data.framesize+xstart)
+        mydata =file_data.get_data(start,xsize)
+        data+=mydata
     return data
 
 def down_sample_data(datain,framesize,outxsize,outysize,transform):
@@ -63,7 +109,6 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
     outdata = []
     xelementsperoutput = framesize/outxsize
     yelementsperoutput = inputysize/outysize
-
 
     # First Thin in x Direction. Creates a 2D array that is outxisize wide but still inputysize long
     for y in range(inputysize):
@@ -126,12 +171,20 @@ def split_data():
     outysize = int(request.args.get('outysize'))
     transform = str(request.args.get('transform'))
 
-    # Check that requested size is within file
+    # Later add support for more file types and implement methods that parse the metadata and return data_file objects
+    file_type = "binary_underscore"
 
-    slicedata = slice_data_from_file(filename,x1,y1,x2,y2)
+    if file_type == "binary_underscore":
+        file_data = openbinaryfile(filename)
+    else:
+        raise Exception("Unsupported file type")
+
+    slicedata = slice_data_from_file(file_data,x1,y1,x2,y2)
     framesize = abs(x1-x2)
 
     down_data = down_sample_data(slicedata,framesize,outxsize,outysize,transform)
 
-    returndata = struct.pack('i'*(outxsize*outysize),*down_data)
+    returndata = struct.pack(file_data.struct_string*(outxsize*outysize),*down_data)
     return (returndata)
+
+
