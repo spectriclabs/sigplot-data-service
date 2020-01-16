@@ -16,7 +16,7 @@ First slide_data_from_file is called and returns only the subset of the file tha
 
 Second the data slice is passed into down_sample_data where the data is downsized to be of size (outxsize by outysize). This method supports several different transform types, mean, max, min, first, and absolute max. 
 
-Currently the web service has one end point /sds that takes 8 parameters:
+Currently the web service has one end point /sds that takes 11 parameters:
   * filename - path/file name to the file from where the app.py is running. 
   * x1 - x point for the first point of the selection rectangle. 
   * y1 - y point for the first point of the selection rectangle. 
@@ -25,6 +25,9 @@ Currently the web service has one end point /sds that takes 8 parameters:
   * outxsize - x size of the data output 
   * outysize - y size of the data output 
   * transform - transform to use to down sample data. Possible options 'max', 'min', 'mean', 'first', 'absmax'
+  * cxmode - Optional Parameter. Used if the inputfile is complex. Options are 'mag','phase','real','imag','10log','20log'. Default is 'mag'
+  * outfmt - Optional Parameter. Used to change the output format from what the input file was. Default is to return the same type as input file. Options are "B", "I", "L", "F", "D", "RGB". In the case of "RGB" the value is converted an RGB value using the colormap.
+  * colormap - Optional Parameter. Colorcet color map. Used when outputing RGB values. Default is raindbow.   
   
 ## Juypter testing
 

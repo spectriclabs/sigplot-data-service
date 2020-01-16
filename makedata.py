@@ -26,12 +26,12 @@ def make_2d_data(x,y,file_format):
         if (yy % 25) == 0:
             for xx in range(x):
                 data[yy].append(yy)
-                if complex_file:
+                if complex_file: #If data is complex, create another entry of the same value. 
                     data[yy].append(yy)
         else:
             for xx in range(x):
                 data[yy].append(xx-yy)
-                if complex_file:
+                if complex_file: #If data is complex, create another entry of the same value. 
                     data[yy].append(xx-yy)
     return data 
 

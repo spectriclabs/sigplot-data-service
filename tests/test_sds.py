@@ -147,7 +147,42 @@ class BasicTests(unittest.TestCase):
         self.assertEqual(int(numpy.mean(meandata)),data[4])
         meandata = (filedata[1004],filedata[1005],filedata[1504],filedata[1505])
         self.assertEqual(int(numpy.mean(meandata)),data[7])
- 
+
+    def test_slice_float_complex_file(self):
+        filename = "../mydata_CF_500_1000"
+        atom_size = 4
+        framesize =500
+        fileysize =1000
+        x1 = 0 
+        y1 = 0
+        x2 = 10
+        y2 = 10
+        outxsize = 5
+        outysize = 5
+        transform = "mean"
+        cxmode = "real"
+        response = self.app.get('/sds?filename=%s&x1=%i&y1=%i&x2=%i&y2=%i&outxsize=%i&outysize=%i&transform=%s&cxmode=%s' 
+                                %(filename,x1,y1,x2,y2,outxsize,outysize,transform,cxmode))
+
+        self.assertEqual(len(response.data),outxsize*outysize*atom_size)
+        data = struct.unpack('f'*(len(response.data)/atom_size),response.data)
+
+        # The test files for complex have duplicate values for i and q. So if we specify the 'real' or 'img' cxmode we should get the same answer as the scale file.
+        filename = "../mydata_SF_500_1000"
+        f = open(filename,"rb") 
+        filedata = f.read(atom_size*framesize*fileysize)
+        filedata = struct.unpack('f'*(framesize*fileysize),filedata)
+
+        # Spot Check some point in the output slice. We are doing a 2X reduction so all points should be an average of two points from one line and two from the next line
+        meandata = (filedata[0],filedata[1],filedata[500],filedata[501])
+        self.assertEqual(int(numpy.mean(meandata)),data[0])
+        meandata = (filedata[2],filedata[3],filedata[502],filedata[503])
+        self.assertEqual(int(numpy.mean(meandata)),data[1])
+        meandata = (filedata[8],filedata[9],filedata[508],filedata[509])
+        self.assertEqual(int(numpy.mean(meandata)),data[4])
+        meandata = (filedata[1004],filedata[1005],filedata[1504],filedata[1505])
+        self.assertEqual(int(numpy.mean(meandata)),data[7])
+
 if __name__ == "__main__":
     unittest.main()
 

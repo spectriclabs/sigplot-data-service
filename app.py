@@ -48,6 +48,8 @@ class data_file():
         self.file_ptr.seek(first_element*self.data_element_size)
         #Read  elements
         byte_data = self.file_ptr.read(length*self.data_element_size)
+        if self.complex:
+            length = length*2
         data= struct.unpack(self.struct_string*length,byte_data)
         return data
 
@@ -88,6 +90,29 @@ def slice_data_from_file(file_data,x1,y1,x2,y2):
         mydata =file_data.get_data(start,xsize)
         data+=mydata
     return data
+
+
+def apply_cxmode(datain,cxmode,lo_thresh=1.0e-20):
+    """ Applies cx_mode to datain. Will return a data list that is half as long. cxmode options are 'mag','phase','real','imag','10log','20log'."""
+    dataout = []
+    for i in range(0,len(datain)-1,2):
+        cxpoint = datain[i]+datain[i+1]*1j
+        if cxmode=="mag":
+            dataout.append(numpy.absolute(cxpoint))
+        elif cxmode=="phase":
+            dataout.append(numpy.angle(cxpoint))
+        elif cxmode=="real":
+            dataout.append(numpy.real(cxpoint))
+        elif cxmode=="imag":
+            dataout.append(numpy.imag(cxpoint))
+        elif cxmode=="10log":
+            dataout.append(10*numpy.log10(max(datain[i]**2+datain[i+1]**2,lo_thresh))) 
+        elif cxmode=="20log":
+            dataout.append(20*numpy.log10(max(datain[i]**2+datain[i+1]**2,lo_thresh))) 
+        else:
+            raise Exception("Invalid cx mode: %s" % (cxmode))
+
+    return dataout
 
 def down_sample_data(datain,framesize,outxsize,outysize,transform):
     """ Takes a 2D input dataset (datain list with framesize elements per line) and return a resized data of outxsize, outysize. 
@@ -170,8 +195,22 @@ def split_data():
     outxsize = int(request.args.get('outxsize'))
     outysize = int(request.args.get('outysize'))
     transform = str(request.args.get('transform'))
+    cxmode = str(request.args.get('cxmode'))
+    outfmt = str(request.args.get('outfmt'))
+    colormap = str(request.args.get('colormap'))
 
-    # Later add support for more file types and implement methods that parse the metadata and return data_file objects
+    # Apply Default to optional Parameters
+    if cxmode =='None':
+        cxmode="mag"
+    
+    if outfmt =='None':
+        outfmt ="passthrough"
+    
+    if colormap =='None':
+        colormap="rainbow"
+
+
+    # TODO - Later add support for more file types and implement methods that parse the metadata and return data_file objects
     file_type = "binary_underscore"
 
     if file_type == "binary_underscore":
@@ -182,7 +221,12 @@ def split_data():
     slicedata = slice_data_from_file(file_data,x1,y1,x2,y2)
     framesize = abs(x1-x2)
 
-    down_data = down_sample_data(slicedata,framesize,outxsize,outysize,transform)
+    if file_data.complex:
+        cx_slicedata = apply_cxmode(slicedata,cxmode)
+    else:
+        cx_slicedata = slicedata
+
+    down_data = down_sample_data(cx_slicedata,framesize,outxsize,outysize,transform)
 
     returndata = struct.pack(file_data.struct_string*(outxsize*outysize),*down_data)
     return (returndata)
