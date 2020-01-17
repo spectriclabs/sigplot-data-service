@@ -103,26 +103,28 @@ def openbinaryfile(filename):
 
     return file_data
 
-def slice_data_from_file(file_data,x1,y1,x2,y2):
-    """ Returns a 2D slice from a 2D file. Assumes that opening the file, will provide necessary meta data about the framesize and bytes per element. 
-        A data points that represent the rectangle of data returned are specified in data elements.
-        The returned data will always start with the lowest index point in the return file even if the first point isn't the lowest index point. 
-        The return value is a list of numbers"""
 
 
-    data = []
+# def slice_data_from_file(file_data,x1,y1,x2,y2):
+#     """ Returns a 2D slice from a 2D file. Assumes that opening the file, will provide necessary meta data about the framesize and bytes per element. 
+#         A data points that represent the rectangle of data returned are specified in data elements.
+#         The returned data will always start with the lowest index point in the return file even if the first point isn't the lowest index point. 
+#         The return value is a list of numbers"""
 
-    ystart = min(y1,y2)
-    xstart = min(x1,x2)
-    ysize = abs(y1-y2)
-    xsize = abs(x1-x2)
+
+#     data = []
+
+#     ystart = min(y1,y2)
+#     xstart = min(x1,x2)
+#     ysize = abs(y1-y2)
+#     xsize = abs(x1-x2)
     
-    # For each needed line to match the ystart and ysize read xsize elements.
-    for line in range(ystart,ystart+ysize):
-        start = (line*file_data.framesize+xstart)
-        mydata =file_data.get_data(start,xsize)
-        data+=mydata
-    return data
+#     # For each needed line to match the ystart and ysize read xsize elements.
+#     for line in range(ystart,ystart+ysize):
+#         start = (line*file_data.framesize+xstart)
+#         mydata =file_data.get_data(start,xsize)
+#         data+=mydata
+#     return data
 
 
 def apply_cxmode(datain,cxmode,lo_thresh=1.0e-20):
@@ -159,26 +161,23 @@ def applycolormap(datain,colormap,zmin,zmax):
         dataout+=[int(color_string[i:i+2], 16) for i in (0, 2, 4)]
     return dataout
 
-def down_sample_data(datain,framesize,outxsize,outysize,transform):
+def down_sample_data_inx(datain,framesize,outxsize,transform):
     """ Takes a 2D input dataset (datain list with framesize elements per line) and return a resized data of outxsize, outysize. 
         Uses the specified transform to perform the resizing """
     
     #Check that input data has a whole number of framesize frames
     if (len(datain)/framesize) % 1 != 0:
-        print("down sample Data needs whole frames")
-        return
+        raise Exception("down sample Data needs whole frames")
     
     inputysize = len(datain)/framesize
 
     #Check that the data is not be enlarged. Currently don't support any upsacaling.
-    if outysize>inputysize or outxsize>framesize:
-        print("Current don't support enlarging data sets")
-        return
+    if outxsize>framesize:
+        raise Exception("Current don't support enlarging data sets")
 
     thinxdata = []
     outdata = []
     xelementsperoutput = framesize/outxsize
-    yelementsperoutput = inputysize/outysize
 
     # First Thin in x Direction. Creates a 2D array that is outxisize wide but still inputysize long
 
@@ -223,7 +222,19 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                     print("Transform %s not supported" %(transform))
                     return
 
-    print("3.5 ",datetime.datetime.now())
+    return thinxdata
+
+
+def down_sample_data_iny(thinxdata,outxsize,outysize,transform):
+    
+    inputysize = len(thinxdata)/outxsize
+    outdata = []
+    yelementsperoutput = inputysize/outysize
+    
+    #Check that the data is not be enlarged. Currently don't support any upsacaling.
+    if outysize>inputysize:
+        print("Current don't support enlarging data sets")
+        return
 
     # Thin in y Direction
     if transform=="mean2":
@@ -264,6 +275,18 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                     print("Transform %s not supported" %(transform))
                     return
     return outdata
+
+def processline(file_data,xstart,ystart,xsize,cxmode,outxsize,transform):
+
+    start = (ystart*file_data.framesize+xstart)
+    slicedata =file_data.get_data(start,xsize)
+
+    if file_data.complex:
+        cx_slicedata = apply_cxmode(slicedata,cxmode)
+    else:
+        cx_slicedata = slicedata
+    down_data_x = down_sample_data_inx(cx_slicedata,xsize,outxsize,transform)
+    return down_data_x
 
 @app.route('/sds')
 def split_data():
@@ -309,21 +332,23 @@ def split_data():
     if outfmt =='None':
         outfmt =file_data.file_format
 
-    print("1. ",datetime.datetime.now())
-    # Step 1 slice data out of inputfile
-    slicedata = slice_data_from_file(file_data,x1,y1,x2,y2)
-    framesize = abs(x1-x2)
+
+
+    ystart = min(y1,y2)
+    xstart = min(x1,x2)
+    ysize = abs(y1-y2)
+    xsize = abs(x1-x2)
+    down_data_x = []
+    # Step 1. For each line of input that needs to be processed, read the line, apply cxmode, and downsize to output size
+    for line in range(ystart,ystart+ysize):
+        down_data_x+=processline(file_data,xstart,line,xsize,cxmode,outxsize,transform)
+    
+    # Step 2 Take all lines processed and down sample data in y dimention to fit outsize
     print("2. ",datetime.datetime.now())
-    # Step 2 Apply Cxmode if applicable
-    if file_data.complex:
-        cx_slicedata = apply_cxmode(slicedata,cxmode)
-    else:
-        cx_slicedata = slicedata
+    down_data = down_sample_data_iny(down_data_x,outxsize,outysize,transform)
+    
+    # Step 3 apply output formatting
     print("3. ",datetime.datetime.now())
-    # Step 3 down sample data to outsize
-    down_data = down_sample_data(cx_slicedata,framesize,outxsize,outysize,transform)
-    print("4. ",datetime.datetime.now())
-    # Step 4 apply output formatting
     if outfmt in ("RGB", "rgb"):
         if zmin==None:
             zmin= int(min(cx_slicedata))
@@ -342,7 +367,9 @@ def split_data():
         if out_file_struct_string in ('h','i','l'):
             down_data = [int(x) for x in down_data]
         returndata = struct.pack(out_file_struct_string*(outxsize*outysize),*down_data)
-    print("5. ",datetime.datetime.now())
+    print("4. ",datetime.datetime.now())
+    
+    # Make Output Response and put metadata in response headers
     resp = app.make_response(returndata)
     resp.headers['outfmt'] = outfmt
     resp.headers['framesize'] = outxsize
