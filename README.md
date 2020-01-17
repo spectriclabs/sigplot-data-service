@@ -24,7 +24,7 @@ Currently the web service has one end point /sds that takes the following parame
   * y2 - y point for the second point of the selection rectangle. 
   * outxsize - x size of the data output 
   * outysize - y size of the data output 
-  * transform - transform to use to down sample data. Possible options 'max', 'min', 'mean', 'first', 'absmax'
+  * transform - transform to use to down sample data. Possible options 'max', 'min', 'mean', 'first', 'absmax'. 'mean2' is a different implmentation of mean that is usually faster. 
   * cxmode - Optional Parameter. Used if the inputfile is complex. Options are 'mag','phase','real','imag','10log','20log'. Default is 'mag'
   * outfmt - Optional Parameter. Used to change the output format from what the input file was. Default is to return the same type as input file. Options are "B", "I", "L", "F", "D", "RGB". Type conversion support is limited, does not scale data, trucates decimal. In the case of "RGB" the value is converted an RGB value using the colormap.
   * colormap - Optional Parameter. Colorcet color map. Used when outputing RGB values. Default is rainbow.   

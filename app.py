@@ -166,55 +166,88 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
     yelementsperoutput = inputysize/outysize
 
     # First Thin in x Direction. Creates a 2D array that is outxisize wide but still inputysize long
-    for y in range(inputysize):
-        for x in range(outxsize):
-            
-            #For each section of transform, find the start and end element
-            startelement = y*framesize+int(round(x*xelementsperoutput))
-            if x!=(outxsize-1):
-                endelement = startelement+ int(numpy.ceil(xelementsperoutput))
-            else:
-                endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
-            
-            if transform == "mean":
-                thinxdata.append(numpy.mean(datain[startelement:endelement]))
-            elif transform == "max" : 
-                thinxdata.append(max(datain[startelement:endelement]))
-            elif transform == "absmax" : 
-                thinxdata.append(max(numpy.absolute(datain[startelement:endelement])))
-            elif transform == "min" : 
-                thinxdata.append(min(datain[startelement:endelement]))
-            elif transform == "first" : 
-                thinxdata.append(datain[startelement])
-            else:
-                print("Transform %s not supported" %(transform))
-                return
+
+    #Mean has a different (faster) implemenation
+    if transform=="mean2":
+        for y in range(inputysize):
+            for x in range(outxsize):
+                
+                #For each section of transform, find the start and end element
+                startelement = y*framesize+int(round(x*xelementsperoutput))
+                if x!=(outxsize-1):
+                    endelement = startelement+ int(numpy.ceil(xelementsperoutput))
+                else:
+                    endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
+                    startelement = endelement - int(numpy.ceil(xelementsperoutput))
+
+                thinxdata.append(datain[startelement:endelement])
+        thinxdata=numpy.mean(thinxdata,axis=1)
+
+    else:
+        for y in range(inputysize):
+            for x in range(outxsize):
+                
+                #For each section of transform, find the start and end element
+                startelement = y*framesize+int(round(x*xelementsperoutput))
+                if x!=(outxsize-1):
+                    endelement = startelement+ int(numpy.ceil(xelementsperoutput))
+                else:
+                    endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
+                    startelement = endelement - int(numpy.ceil(xelementsperoutput))
+                if transform == "mean":
+                    thinxdata.append(numpy.mean(datain[startelement:endelement]))
+                elif transform == "max" : 
+                    thinxdata.append(max(datain[startelement:endelement]))
+                elif transform == "absmax" : 
+                    thinxdata.append(max(numpy.absolute(datain[startelement:endelement])))
+                elif transform == "min" : 
+                    thinxdata.append(min(datain[startelement:endelement]))
+                elif transform == "first" : 
+                    thinxdata.append(datain[startelement])
+                else:
+                    print("Transform %s not supported" %(transform))
+                    return
 
     print("3.5 ",datetime.datetime.now())
 
     # Thin in y Direction
-    for y in range(outysize):
-        for x in range(outxsize):
-            #For each section of transform, find the start, end, and stridesize 
-            startelement = x+outxsize*int(round(y*yelementsperoutput))
-            if y !=(outysize-1):
-                endelement = startelement + (int(numpy.ceil(yelementsperoutput))-1)*outxsize+1
-            else:
-                endelement = (inputysize-1)*outxsize+x+1
-            stridesize = outxsize
-            if transform == "mean":
-                outdata.append(numpy.mean(thinxdata[startelement:endelement:stridesize])) 
-            elif transform == "max" : 
-                outdata.append(max(thinxdata[startelement:endelement:stridesize]))
-            elif transform == "absmax" : 
-                outdata.append(max(numpy.absolute(thinxdata[startelement:endelement:stridesize])))
-            elif transform == "min" : 
-                outdata.append(min(datain[startelement:endelement]))
-            elif transform == "first" : 
-                outdata.append(datain[startelement])
-            else:
-                print("Transform %s not supported" %(transform))
-                return
+    if transform=="mean2":
+        for y in range(outysize):
+            for x in range(outxsize):
+                #For each section of transform, find the start, end, and stridesize 
+                startelement = x+outxsize*int(round(y*yelementsperoutput))
+                if y !=(outysize-1):
+                    endelement = startelement + (int(numpy.ceil(yelementsperoutput))-1)*outxsize+1
+                else:
+                    endelement = (inputysize-1)*outxsize+x+1
+                    startelement = endelement - (int(numpy.ceil(yelementsperoutput))-1)*outxsize-1
+                stridesize = outxsize
+                outdata.append(thinxdata[startelement:endelement:stridesize])
+        outdata = numpy.mean(outdata,axis=1)
+    else:
+        for y in range(outysize):
+            for x in range(outxsize):
+                #For each section of transform, find the start, end, and stridesize 
+                startelement = x+outxsize*int(round(y*yelementsperoutput))
+                if y !=(outysize-1):
+                    endelement = startelement + (int(numpy.ceil(yelementsperoutput))-1)*outxsize+1
+                else:
+                    endelement = (inputysize-1)*outxsize+x+1
+                    startelement = endelement - (int(numpy.ceil(yelementsperoutput))-1)*outxsize-1
+                stridesize = outxsize
+                if transform == "mean":
+                    outdata.append(numpy.mean(thinxdata[startelement:endelement:stridesize])) 
+                elif transform == "max" : 
+                    outdata.append(max(thinxdata[startelement:endelement:stridesize]))
+                elif transform == "absmax" : 
+                    outdata.append(max(numpy.absolute(thinxdata[startelement:endelement:stridesize])))
+                elif transform == "min" : 
+                    outdata.append(min(datain[startelement:endelement]))
+                elif transform == "first" : 
+                    outdata.append(datain[startelement])
+                else:
+                    print("Transform %s not supported" %(transform))
+                    return
     return outdata
 
 @app.route('/sds')
