@@ -5,13 +5,21 @@ import numpy
 import colorcet 
 import datetime
 
+bluefileAvailable = True
+try:
+    import bluefile
+except ImportError:
+    print("Bluefile could not be found")
+    bluefileAvailable = False
+
+
 app = Flask(__name__)
 
 class data_file():
 
     
     """ Constructor takes byte array and metadata details and constructs data_list """
-    def __init__(self,file_ptr,file_format,framesize=1):
+    def __init__(self,file_ptr,file_format,framesize=1,dataoffset=0):
        
         self.file_ptr = file_ptr #File_ptr to start of data. If file has header, then set this to poing after header
         self.framesize =1 # framesize for 2D data, default to 1 for 1D data
@@ -22,6 +30,7 @@ class data_file():
         self.file_format = file_format[1] # FileFormat Character
         
         self.framesize = int(framesize)
+        self.dataoffset = dataoffset
         if file_format[0] in ("C","c"):
             self.complex = True
         if file_format[1] in ("F","f"):
@@ -48,7 +57,7 @@ class data_file():
     """ Returns data from file starting at first_element for length elements """
     def get_data(self,first_element,length):
         # Got to start element
-        self.file_ptr.seek(first_element*self.data_element_size)
+        self.file_ptr.seek(first_element*self.data_element_size+self.dataoffset)
         #Read  elements
         byte_data = self.file_ptr.read(length*self.data_element_size)
         if self.complex:
@@ -72,6 +81,12 @@ def getstructstring(file_format):
             return None
 
 
+def openbluefile(filename):
+    header,f  = bluefile.readheader(filename,keepopen=True)
+    file_format = header['format']
+    framesize = header['subsize']
+    file_data = data_file(f,file_format,framesize=framesize,dataoffset = int(header['data_start']))
+    return file_data
 
 def openbinaryfile(filename):
     """ Simple function for opening a binary file. The file name is assumed to have a basename,file_format, then two number seperated by underscores.
@@ -277,10 +292,17 @@ def split_data():
 
 
     # TODO - Later add support for more file types and implement methods that parse the metadata and return data_file objects
-    file_type = "binary_underscore"
+    if ".tmp" in filename or ".prm" in filename:
+        file_type = "blue"
+    else:
+        file_type = "binary_underscore"
 
     if file_type == "binary_underscore":
         file_data = openbinaryfile(filename)
+    elif file_type == "blue":
+        if not(bluefileAvailable):
+            raise Exception("Bluefile Support is not available")
+        file_data = openbluefile(filename)
     else:
         raise Exception("Unsupported file type")
 
