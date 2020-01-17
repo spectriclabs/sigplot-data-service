@@ -2,6 +2,8 @@ from flask import Flask
 from flask import request
 import struct
 import numpy
+import colorcet 
+import datetime
 
 app = Flask(__name__)
 
@@ -17,12 +19,11 @@ class data_file():
         self.data_element_size = 4 #Number of bytes of underlying data for each element. Twice atom_size for complex
         self.complex = False # True for Complex Data. False for Scaler. Complex data assumed to have two basic elements for each element
         self.struct_string = "f" # String for using python struct command to pack and unpack the data 
-        
+        self.file_format = file_format[1] # FileFormat Character
         
         self.framesize = int(framesize)
         if file_format[0] in ("C","c"):
             self.complex = True
-        
         if file_format[1] in ("F","f"):
             self.atom_size = 4
             self.struct_string = "f"
@@ -41,6 +42,8 @@ class data_file():
         
         if self.complex==True:
             self.data_element_size = 2*self.atom_size
+        else:
+            self.data_element_size =self.atom_size
 
     """ Returns data from file starting at first_element for length elements """
     def get_data(self,first_element,length):
@@ -52,6 +55,21 @@ class data_file():
             length = length*2
         data= struct.unpack(self.struct_string*length,byte_data)
         return data
+
+def getstructstring(file_format):
+
+        if file_format in ("F","f","SF","sf"):
+            return "f"
+        elif file_format in ("I","i","SI", "si"):  
+            return "h"
+        elif file_format in ("D","d","SD","sd"):  
+            return"d"
+        elif file_format in ("L","l","SL","sl"):  
+            return "i"
+        elif file_format in ("B","b","SB","sb"):  
+            return "h"
+        else:
+            return None
 
 
 
@@ -114,6 +132,18 @@ def apply_cxmode(datain,cxmode,lo_thresh=1.0e-20):
 
     return dataout
 
+def applycolormap(datain,colormap,zmin,zmax):
+    dataout = []
+    color_per_span = (zmax-zmin)/256.0
+    for data in datain:
+        color_value = int(min(max((data-zmin)/color_per_span,0),255))
+        try:
+            color_string = (colorcet.palette[colormap][color_value])[1:]
+        except KeyError:
+            raise Exception("Invalid ColorMap")
+        dataout+=[int(color_string[i:i+2], 16) for i in (0, 2, 4)]
+    return dataout
+
 def down_sample_data(datain,framesize,outxsize,outysize,transform):
     """ Takes a 2D input dataset (datain list with framesize elements per line) and return a resized data of outxsize, outysize. 
         Uses the specified transform to perform the resizing """
@@ -160,6 +190,8 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                 print("Transform %s not supported" %(transform))
                 return
 
+    print("3.5 ",datetime.datetime.now())
+
     # Thin in y Direction
     for y in range(outysize):
         for x in range(outxsize):
@@ -171,7 +203,7 @@ def down_sample_data(datain,framesize,outxsize,outysize,transform):
                 endelement = (inputysize-1)*outxsize+x+1
             stridesize = outxsize
             if transform == "mean":
-                outdata.append(int(numpy.mean(thinxdata[startelement:endelement:stridesize]))) #currently hardcoded to output int
+                outdata.append(numpy.mean(thinxdata[startelement:endelement:stridesize])) 
             elif transform == "max" : 
                 outdata.append(max(thinxdata[startelement:endelement:stridesize]))
             elif transform == "absmax" : 
@@ -198,13 +230,14 @@ def split_data():
     cxmode = str(request.args.get('cxmode'))
     outfmt = str(request.args.get('outfmt'))
     colormap = str(request.args.get('colormap'))
-
+    zmin = (request.args.get('zmin'))
+    zmax = (request.args.get('zmax'))
+    
     # Apply Default to optional Parameters
     if cxmode =='None':
         cxmode="mag"
     
-    if outfmt =='None':
-        outfmt ="passthrough"
+
     
     if colormap =='None':
         colormap="rainbow"
@@ -218,17 +251,50 @@ def split_data():
     else:
         raise Exception("Unsupported file type")
 
+    if outfmt =='None':
+        outfmt =file_data.file_format
+
+    print("1. ",datetime.datetime.now())
+    # Step 1 slice data out of inputfile
     slicedata = slice_data_from_file(file_data,x1,y1,x2,y2)
     framesize = abs(x1-x2)
-
+    print("2. ",datetime.datetime.now())
+    # Step 2 Apply Cxmode if applicable
     if file_data.complex:
         cx_slicedata = apply_cxmode(slicedata,cxmode)
     else:
         cx_slicedata = slicedata
-
+    print("3. ",datetime.datetime.now())
+    # Step 3 down sample data to outsize
     down_data = down_sample_data(cx_slicedata,framesize,outxsize,outysize,transform)
+    print("4. ",datetime.datetime.now())
+    # Step 4 apply output formatting
+    if outfmt in ("RGB", "rgb"):
+        if zmin==None:
+            zmin= int(min(cx_slicedata))
+        else:
+            zmin = int(zmin)
+        if zmax==None:
+            zmax= int(max(cx_slicedata))
+        else:
+            zmax = int(zmax)
+        returndata = applycolormap(down_data,colormap,zmin,zmax)
+        returndata = struct.pack('B'*(outxsize*outysize*3),*returndata)
+    else:
+        out_file_struct_string = getstructstring(outfmt)
+        if not(out_file_struct_string):
+            raise Exception("Invalid outfmt mode: %s" % (cxmode))
+        if out_file_struct_string in ('h','i','l'):
+            down_data = [int(x) for x in down_data]
+        returndata = struct.pack(out_file_struct_string*(outxsize*outysize),*down_data)
+    print("5. ",datetime.datetime.now())
+    resp = app.make_response(returndata)
+    resp.headers['outfmt'] = outfmt
+    resp.headers['framesize'] = outxsize
+    resp.headers['colormap'] = colormap
+    resp.headers['zmin'] = zmin
+    resp.headers['zmax'] = zmax
 
-    returndata = struct.pack(file_data.struct_string*(outxsize*outysize),*down_data)
-    return (returndata)
+    return (resp)
 
 
