@@ -4,6 +4,8 @@ import struct
 import numpy
 import colorcet 
 import datetime
+import numba
+from numba import jit
 
 bluefileAvailable = True
 try:
@@ -26,7 +28,7 @@ class data_file():
         self.atom_size = 4 #Number of bytes of underlying atom as received or sent
         self.data_element_size = 4 #Number of bytes of underlying data for each element. Twice atom_size for complex
         self.complex = False # True for Complex Data. False for Scaler. Complex data assumed to have two basic elements for each element
-        self.struct_string = "f" # String for using python struct command to pack and unpack the data 
+        self.struct_string = 'f' # String for using python struct command to pack and unpack the data 
         self.file_format = file_format[1] # FileFormat Character
         
         self.framesize = int(framesize)
@@ -35,19 +37,19 @@ class data_file():
             self.complex = True
         if file_format[1] in ("F","f"):
             self.atom_size = 4
-            self.struct_string = "f"
+            self.struct_string = 'f'
         elif file_format[1] in ("I","i"):  
             self.atom_size = 2
-            self.struct_string = "h"
+            self.struct_string = 'h'
         elif file_format[1] in ("D","d"):  
             self.atom_size = 8
             self.struct_string = "d"
         elif file_format[1] in ("L","l"):  
             self.atom_size = 4
-            self.struct_string = "i"
+            self.struct_string = 'i'
         elif file_format[1] in ("B","b"):  
             self.atom_size = 1
-            self.struct_string = "h"
+            self.struct_string = 'h'
         
         if self.complex==True:
             self.data_element_size = 2*self.atom_size
@@ -62,8 +64,27 @@ class data_file():
         byte_data = self.file_ptr.read(length*self.data_element_size)
         if self.complex:
             length = length*2
-        data= struct.unpack(self.struct_string*length,byte_data)
+        data= np.array(struct.unpack(self.struct_string*length,byte_data))
         return data
+
+@jit()
+def get_bytes_from_file(file_name,first_element,length,data_element_size,dataoffset,struct_char,data_complex):
+        file_ptr = open(file_name,"rb")
+        file_ptr.seek(first_element*data_element_size+dataoffset)
+        #Read  elements
+        byte_data = file_ptr.read(length*data_element_size)
+        if data_complex:
+            length = length*2
+        data= numpy.array(struct.unpack(struct_char*length,byte_data))
+        return data
+
+transform_code = {
+    "mean" :1,
+    "max" :2,
+    "min" :3,
+    "absmax":4,
+    "first":5
+}
 
 def getstructstring(file_format):
 
@@ -161,28 +182,60 @@ def applycolormap(datain,colormap,zmin,zmax):
         dataout+=[int(color_string[i:i+2], 16) for i in (0, 2, 4)]
     return dataout
 
-def down_sample_data_inx(datain,framesize,outxsize,transform):
-    """ Takes a 2D input dataset (datain list with framesize elements per line) and return a resized data of outxsize, outysize. 
-        Uses the specified transform to perform the resizing """
+@jit(nopython=True)
+def down_sample_data_inx(datain,framesize,outxsize,transform_code):
+    inputysize = int(len(datain)/framesize)
+    xelementsperoutput = float(framesize/outxsize)
+    thinxdata_array =numpy.empty(int(inputysize*outxsize))
+
+    for y in range(inputysize):
+        for x in range(outxsize):
+            
+            #For each section of transform, find the start and end element
+            startelement = y*framesize+int(round(x*xelementsperoutput))
+            if x!=(outxsize-1):
+                endelement = startelement+ int(numpy.ceil(xelementsperoutput))
+            else:
+                endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
+                startelement = endelement - int(numpy.ceil(xelementsperoutput))
+
+            if transform_code ==1: #mean
+                thinxdata_array[y*outxsize+x] = numpy.mean(datain[startelement:endelement])
+            elif transform_code ==2: #max
+                thinxdata_array[y*outxsize+x] = numpy.max(datain[startelement:endelement])
+            elif transform_code ==3: #min
+                thinxdata_array[y*outxsize+x] = numpy.min(datain[startelement:endelement])
+            elif transform_code ==4: #Max abs 
+                thinxdata_array[y*outxsize+x] = numpy.max(numpy.absolute(datain[startelement:endelement]))
+            elif transform_code ==5: #first
+                thinxdata_array[y*outxsize+x] = datain[startelement]
+
+    return thinxdata_array
+
+# def down_sample_data_inx(datain,framesize,outxsize,transform_code):
+#     """ Takes a 2D input dataset (datain list with framesize elements per line) and return a resized data of outxsize, outysize. 
+#         Uses the specified transform to perform the resizing """
     
-    #Check that input data has a whole number of framesize frames
-    if (len(datain)/framesize) % 1 != 0:
-        raise Exception("down sample Data needs whole frames")
+#     #Check that input data has a whole number of framesize frames
+#     if (len(datain)/framesize) % 1 != 0:
+#         raise Exception("down sample Data needs whole frames")
     
-    inputysize = len(datain)/framesize
+#     inputysize = len(datain)/framesize
 
-    #Check that the data is not be enlarged. Currently don't support any upsacaling.
-    if outxsize>framesize:
-        raise Exception("Current don't support enlarging data sets")
+#     #Check that the data is not be enlarged. Currently don't support any upsacaling.
+#     if outxsize>framesize:
+#         raise Exception("Current don't support enlarging data sets")
 
-    thinxdata = []
-    outdata = []
-    xelementsperoutput = framesize/outxsize
 
-    # First Thin in x Direction. Creates a 2D array that is outxisize wide but still inputysize long
+#     # First Thin in x Direction. Creates a 2D array that is outxisize wide but still inputysize long
+#     thinxdata_array = numpy.array([])
+#     thinxdata_array = down_sample_data_inx(datain_array,framesize,outxsize,transform_code)
 
-    #Mean has a different (faster) implemenation
-    if transform=="mean2":
+#     return thinxdata
+
+
+"""     #Mean has a different (faster) implemenation
+    elif transform=="mean2":
         for y in range(inputysize):
             for x in range(outxsize):
                 
@@ -193,9 +246,10 @@ def down_sample_data_inx(datain,framesize,outxsize,transform):
                 else:
                     endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
                     startelement = endelement - int(numpy.ceil(xelementsperoutput))
-
                 thinxdata.append(datain[startelement:endelement])
-        thinxdata=numpy.mean(thinxdata,axis=1)
+                #numpy.append(thinxdata_array,datain[startelement:endelement])
+        thinxdata_array_mean=numpy.mean(thinxdata,axis=1)
+        thinxdata = thinxdata_array_mean.tolist()
 
     else:
         for y in range(inputysize):
@@ -208,6 +262,7 @@ def down_sample_data_inx(datain,framesize,outxsize,transform):
                 else:
                     endelement = ((y+1)*framesize)# for last point in output, last point cannot go beyond input size
                     startelement = endelement - int(numpy.ceil(xelementsperoutput))
+                
                 if transform == "mean":
                     thinxdata.append(numpy.mean(datain[startelement:endelement]))
                 elif transform == "max" : 
@@ -220,13 +275,13 @@ def down_sample_data_inx(datain,framesize,outxsize,transform):
                     thinxdata.append(datain[startelement])
                 else:
                     print("Transform %s not supported" %(transform))
-                    return
+                    return """
 
-    return thinxdata
+
 
 
 def down_sample_data_iny(thinxdata,outxsize,outysize,transform):
-    
+    #print("down_sample_data_iny", len(thinxdata),type(thinxdata),outxsize,outysize,transform)
     inputysize = len(thinxdata)/outxsize
     outdata = []
     yelementsperoutput = inputysize/outysize
@@ -237,7 +292,7 @@ def down_sample_data_iny(thinxdata,outxsize,outysize,transform):
         return
 
     # Thin in y Direction
-    if transform=="mean2":
+    if transform == "mean2":
         for y in range(outysize):
             for x in range(outxsize):
                 #For each section of transform, find the start, end, and stridesize 
@@ -263,30 +318,36 @@ def down_sample_data_iny(thinxdata,outxsize,outysize,transform):
                 stridesize = outxsize
                 if transform == "mean":
                     outdata.append(numpy.mean(thinxdata[startelement:endelement:stridesize])) 
+                elif transform == "mean_numba":
+                    outdata.append(numpy.mean(thinxdata[startelement:endelement:stridesize])) 
                 elif transform == "max" : 
                     outdata.append(max(thinxdata[startelement:endelement:stridesize]))
                 elif transform == "absmax" : 
                     outdata.append(max(numpy.absolute(thinxdata[startelement:endelement:stridesize])))
                 elif transform == "min" : 
-                    outdata.append(min(datain[startelement:endelement]))
+                    outdata.append(min(thinxdata[startelement:endelement]))
                 elif transform == "first" : 
-                    outdata.append(datain[startelement])
+                    outdata.append(thinxdata[startelement])
                 else:
                     print("Transform %s not supported" %(transform))
                     return
     return outdata
 
-def processline(file_data,xstart,ystart,xsize,cxmode,outxsize,transform):
+# @jit(nopython=True)
+# def processdata_inx(datain_array,xstart,ystart,xsize,ysize,cxmode,outxsize,transform_code):
+#     down_data_x = numpy.array.empty(int(inputysize*outxsize))
 
-    start = (ystart*file_data.framesize+xstart)
-    slicedata =file_data.get_data(start,xsize)
 
-    if file_data.complex:
-        cx_slicedata = apply_cxmode(slicedata,cxmode)
-    else:
-        cx_slicedata = slicedata
-    down_data_x = down_sample_data_inx(cx_slicedata,xsize,outxsize,transform)
-    return down_data_x
+#         #if file_data.complex:
+#         #    cx_slicedata = apply_cxmode(slicedata,cxmode)
+#         #else:
+#         #    cx_slicedata = slicedata
+        
+#         #datain_array = numpy.array(cx_slicedata)
+#         down_data_x = down_sample_data_inx(datain_array[line],xsize,outxsize,transform_code)
+#         down_data_x += thinxdata_array.tolist()
+#         #down_data_x = down_sample_data_inx(cx_slicedata,xsize,outxsize,transform)
+#     return down_data_x
 
 @app.route('/sds')
 def split_data():
@@ -339,16 +400,28 @@ def split_data():
     ysize = abs(y1-y2)
     xsize = abs(x1-x2)
     down_data_x = []
-    # Step 1. For each line of input that needs to be processed, read the line, apply cxmode, and downsize to output size
+    filedata = numpy.empty((ysize,xsize))
+    # Step 1. Read Data From File
+    print("1. ",datetime.datetime.now())
     for line in range(ystart,ystart+ysize):
-        down_data_x+=processline(file_data,xstart,line,xsize,cxmode,outxsize,transform)
-    
-    # Step 2 Take all lines processed and down sample data in y dimention to fit outsize
+        start = (line*xsize+xstart)
+        filedata[line]=get_bytes_from_file(filename,start,xsize,file_data.data_element_size,file_data.dataoffset,file_data.struct_string,file_data.complex)
+        #slicedata =file_data.get_data(start,)
+
+    # Step 2. For each line of input that needs to be processed, read the line, apply cxmode, and downsize to output size
     print("2. ",datetime.datetime.now())
+    down_data_array = down_sample_data_inx(filedata,xsize,outxsize,transform_code[transform])
+    #down_data_array = processdata_inx(filedata,xstart,ystart,xsize,ysize,cxmode,outxsize,transform_code[transform])
+    down_data_x = down_data_array.to_list()
+    #for line in range(ystart,ystart+ysize):
+    #    down_data_x+=processline(file_data,xstart,line,xsize,cxmode,outxsize,transform)
+    
+    # Step 3 Take all lines processed and down sample data in y dimention to fit outsize
+    print("3. ",datetime.datetime.now())
     down_data = down_sample_data_iny(down_data_x,outxsize,outysize,transform)
     
-    # Step 3 apply output formatting
-    print("3. ",datetime.datetime.now())
+    # Step 4 apply output formatting
+    print("4. ",datetime.datetime.now())
     if outfmt in ("RGB", "rgb"):
         if zmin==None:
             zmin= int(min(cx_slicedata))

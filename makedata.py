@@ -36,9 +36,9 @@ def make_2d_data(x,y,file_format):
     return data 
 
 if __name__ == "__main__":
-    xfile = 500
-    yfile = 1000
-    file_format = "CF"
+    xfile = 8192
+    yfile = 20000
+    file_format = "SI"
     data = make_2d_data(xfile,yfile,file_format)
     f= open("mydata_%s_%s_%s" %(file_format,xfile,yfile),"w+")
     for datalist in data:
