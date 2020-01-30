@@ -18,63 +18,115 @@ import (
 	"unsafe"
 )
 
-func createOutput(dataIn []float64,fileFormatString string) []byte {
-    dataOut := new(bytes.Buffer)
-    //var dataOut []byte
-	switch string(fileFormatString[1]) {
-    case "B":
-        var numSlice=make([]int8,len(dataIn))
-        for i:=0;i<len(numSlice);i++ {
-			numSlice[i] = int8(dataIn[i])
+var fileZMin float64
+var fileZMax float64
+
+func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,colorMap string) []byte {
+	dataOut := new(bytes.Buffer)
+	var numColors int = 1000
+	//var dataOut []byte
+	if fileFormatString=="RGBA" {
+		controlColors := getColorConrolPoints(colorMap)
+		colorPalette:=makeColorPalette(controlColors,numColors)
+		//fmt.Println("colorPalette 0 " ,colorPalette[0].red,colorPalette[0].green,colorPalette[0].blue)
+		//fmt.Println("colorPalette 1 " ,colorPalette[1].red,colorPalette[1].green,colorPalette[1].blue)
+		//fmt.Println("colorPalette 1 " ,colorPalette[2].red,colorPalette[2].green,colorPalette[2].blue)
+		colorsPerSpan := (zmax-zmin) / float64(numColors)
+		for i:=0;i<len(dataIn);i++ {
+			colorIndex:= math.Round((dataIn[i]-zmin)/colorsPerSpan)
+			colorIndex = math.Min(math.Max(colorIndex,0),float64(numColors-1)) //Ensure colorIndex is within the colorPalette
+			//r := uint32(math.Round((float64(colorPalette[int(colorIndex)].red)/65535)*float64(255)))
+			//g := uint32(math.Round((float64(colorPalette[int(colorIndex)].green)/65535)*float64(255)))
+			//b := uint32(math.Round((float64(colorPalette[int(colorIndex)].blue)/65535)*float64(255)))
+			a := 255
+			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].red))
+			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].green))
+			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].blue))
+			dataOut.WriteByte(byte(a))
 		}
-
-        err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
-       
-		check(err)
-
-    case "I":
-        var numSlice=make([]int16,len(dataIn))
-        for i:=0;i<len(numSlice);i++ {
-			numSlice[i] = int16(dataIn[i])
-		}
-
-        err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
-       
-		check(err)      
-
-    case "L":
-        var numSlice=make([]int32,len(dataIn))
-        for i:=0;i<len(numSlice);i++ {
-			numSlice[i] = int32(dataIn[i])
-		}
-
-        err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
-       
-		check(err)    
-
-    case "F":
-        var numSlice=make([]float32,len(dataIn))
-        for i:=0;i<len(numSlice);i++ {
-			numSlice[i] = float32(dataIn[i])
-		}
-
-        err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
-       
-		check(err)     
-
-    case "D":
-        var numSlice=make([]float64,len(dataIn))
-        for i:=0;i<len(numSlice);i++ {
-			numSlice[i] = float64(dataIn[i])
-		}
-
-        err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
-       
-		check(err)  
-    }
-
+	//fmt.Println("out_data RGBA" , len(dataOut.Bytes()))
 	return dataOut.Bytes()
+	} else {
+		//fmt.Println("Processing for Type ",fileFormatString)
+		switch string(fileFormatString[1]) {
+		case "B":
+			var numSlice=make([]int8,len(dataIn))
+			for i:=0;i<len(numSlice);i++ {
+				numSlice[i] = int8(dataIn[i])
+			}
 
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+		
+			check(err)
+
+		case "I":
+			var numSlice=make([]int16,len(dataIn))
+			for i:=0;i<len(numSlice);i++ {
+				numSlice[i] = int16(dataIn[i])
+			}
+
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+		
+			check(err)      
+
+		case "L":
+			fmt.Println("Processing for Type L")
+			var numSlice=make([]int32,len(dataIn))
+			for i:=0;i<len(numSlice);i++ {
+				numSlice[i] = int32(dataIn[i])
+			}
+
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+		
+			check(err)    
+
+		case "F":
+			var numSlice=make([]float32,len(dataIn))
+			for i:=0;i<len(numSlice);i++ {
+				numSlice[i] = float32(dataIn[i])
+			}
+
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+		
+			check(err)     
+
+		case "D":
+			var numSlice=make([]float64,len(dataIn))
+			for i:=0;i<len(numSlice);i++ {
+				numSlice[i] = float64(dataIn[i])
+			}
+
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+		
+			check(err)  
+		}
+	//fmt.Println("out_data" , len(dataOut.Bytes()))
+	return dataOut.Bytes()
+	}
+
+}
+
+func processBlueFileHeader(fileName string) (string,int,int,float64,float64,float64,float64,float64,float64) {
+
+	var bluefileheader BlueHeader
+	file,err :=os.Open(fileName)
+	check(err)
+	binary.Read(file,binary.LittleEndian,&bluefileheader)
+	//num_read,err:=file.Read(bluefileheader)
+
+	fileFormat:=string(bluefileheader.Format[:])
+	file_type :=int(bluefileheader.File_type)
+	subsize:= int(bluefileheader.Subsize)
+	xstart:=bluefileheader.Xstart
+	xdelta:=bluefileheader.Xdelta
+	ystart:=bluefileheader.Ystart
+	ydelta:=bluefileheader.Ydelta
+	data_start:=bluefileheader.Data_start
+	data_size:=bluefileheader.Data_size
+
+	fmt.Println("header data" , fileFormat,file_type,subsize)
+
+	return fileFormat,file_type,subsize,xstart,xdelta,ystart,ydelta,data_start,data_size
 }
 
 func convert_file_data(bytesin []byte,file_formatstring string) []float64 {
@@ -254,7 +306,7 @@ func apply_cxmode(datain []float64,cxmode string) []float64{
 
 }
 
-func processline(file_name string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string) []float64 {
+func processline(outChannel chan []float64, file_name string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string) {
 
 	bytes_per_atom,complex_flag := get_file_type_info(file_format)
 	//fmt.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
@@ -269,6 +321,12 @@ func processline(file_name string, file_format string,file_data_offset int,fileX
 	filedata := get_bytes_from_file(file_name ,first_byte ,bytes_length)
 	data_to_process :=convert_file_data(filedata,file_format)
 
+	localMax := floats.Max(data_to_process[:])
+	fileZMax = math.Max(fileZMax,localMax)
+
+	localMin := floats.Min(data_to_process[:])
+	fileZMin = math.Min(fileZMin,localMin)
+
 	var real_data []float64
 	if complex_flag {
 		real_data=apply_cxmode(data_to_process,"mag")
@@ -278,11 +336,11 @@ func processline(file_name string, file_format string,file_data_offset int,fileX
 	out_data:=down_sample_line_inx(real_data,outxsize,transform)
 
 	//fmt.Println("processline", len(out_data))
-	return out_data
+	outChannel<- out_data
 
 }
 
-func processRequest(file_name string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string) []byte {
+func processRequest(file_name string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize)/float64(outysize)
@@ -304,13 +362,31 @@ func processRequest(file_name string,file_format string,fileDataOffset int,fileX
 			startLine= endLine - yLinesPerOutputCeil
 		}
 
+		// Number of y lines that will be processed this time through the loop 
+		numLines := endLine - startLine
+
+		// Make channels to collect the data from processing all the lines in parallel. 
+		var chans [100]chan []float64
+		for i:=range chans {
+			chans[i] = make(chan []float64)
+		}
 		var xThinData []float64
 		//fmt.Println("Going to Process Input Lines", startLine, endLine)
+
+		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine:=startLine;inputLine<endLine;inputLine++ {
-			lineData := processline(file_name,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform)
-			xThinData = append(xThinData,lineData...)
+			go processline(chans[inputLine-startLine],file_name,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform)
+
 		}
-		//fmt.Println("Thin X data is currently ", len(xThinData))
+
+		// Pull Data out of concurrent channels in order into input arrary.
+		for i:=0; i<numLines; i++ {
+			data := <-chans[i]
+			for j:=0; j<len(data); j++{
+				xThinData = append(xThinData,data[j])
+			}
+		}
+		
 		// Thin in y direction the subsset of lines that have now been processed in x
 		yThinData:=downSampleLineInY(xThinData,outxsize,transform)
 		//fmt.Println("Thin Y data is currently ", len(yThinData))
@@ -321,79 +397,196 @@ func processRequest(file_name string,file_format string,fileDataOffset int,fileX
 	}
 	//fmt.Println("Spot Check 0,49,50,99,:",processedData[0], processedData[49], processedData[50], processedData[99]) 
 
+	if !zset {
+		zmin = fileZMin
+		zmax = fileZMax
+	} 
+
 	//var outData=make([]byte,len(processedData))
-	outData:=createOutput(processedData,outputFmt)
+	outData:=createOutput(processedData,outputFmt,zmin,zmax,colorMap)
 	return outData
 }
 
-func getURLArgumentInt(r *http.Request,keyname string) int {
+func getURLArgumentInt(r *http.Request,keyname string) (int,bool) {
 	keys, ok := r.URL.Query()[keyname]
     
     if !ok || len(keys[0]) < 1 {
-        log.Println("Url Param ",keyname, "  is missing")
-        return 0
+    //    log.Println("Url Param ",keyname, "  is missing")
+        return 0,false
 	}
 	retval,err := strconv.Atoi(keys[0])
 	if err != nil{
 		log.Println("Url Param ",keyname, "  is invalid")
-		return 0
+		return 0,false
 	}
-	return retval
+	return retval,true
 } 
 
-func getURLArgumentString(r *http.Request,keyname string) string {
+func getURLArgumentString(r *http.Request,keyname string) (string,bool) {
 	keys, ok := r.URL.Query()[keyname]
     
     if !ok || len(keys[0]) < 1 {
-        log.Println("Url Param ",keyname, "  is missing")
-        return ""
+       // log.Println("Url Param ",keyname, "  is missing")
+        return "",false
 	}
-	return keys[0]
+	return keys[0],true
 } 
 
 type server struct{}
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    w.WriteHeader(http.StatusOK)
-	//w.Header().Set("Content-Type", "application/json")
 
-	file_name  :=getURLArgumentString(r,"filename")
-	fileData := strings.Split(file_name, "_")
-
-	// Need to get these parameters from file metadata
-	file_format  := fileData[1]
-	fileDataOffset  := 0
-	fileXSize,err := strconv.Atoi(fileData[2])
-	if err != nil{
-		log.Println("Bad xfile size in filename")
-		fileXSize = 0
+	file_name,ok  :=getURLArgumentString(r,"filename")
+	if !ok {
+		log.Println("Filename Missing. Required Field")
+		w.WriteHeader(400)
+		return 
 	}
 
+	var file_format string 
+	var file_type int 
+	var fileXSize int 
+	var filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size float64
+	var fileDataOffset int
+	if strings.Contains(file_name,".tmp") {
+		log.Println("Processing File as Blue File")
+		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(file_name)
+		fileDataOffset  = int(data_offset)
+		if file_type !=2000 {
+			log.Println("Only Supports type 2000 Bluefiles")
+			w.WriteHeader(400)
+			return 
+		}
 
-	x1 :=getURLArgumentInt(r,"x1")
-	y1 :=getURLArgumentInt(r,"y1")
-	x2 :=getURLArgumentInt(r,"x2")
-	y2 :=getURLArgumentInt(r,"y2")
+	} else if strings.Count(file_name,"_")==3 {
+		log.Println("Processing File as binary file with metadata in filename with underscores")
+		fileData := strings.Split(file_name, "_")
+		// Need to get these parameters from file metadata
+		file_format  = fileData[1]
+		fileDataOffset  = 0
+		var err error
+		fileXSize,err = strconv.Atoi(fileData[2])
+		if err != nil{
+			log.Println("Bad xfile size in filename")
+			fileXSize = 0
+			w.WriteHeader(400)
+			return 
+		}
+	} else {
+		log.Println("Invalid File Type")
+		w.WriteHeader(400)
+		return 
+	}
+
+	// Get Rest of URL Parameters
+	x1,ok :=getURLArgumentInt(r,"x1")
+	if !ok {
+		log.Println("X1 Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	y1,ok :=getURLArgumentInt(r,"y1")
+	if !ok {
+		log.Println("Y1 Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	x2,ok :=getURLArgumentInt(r,"x2")
+	if !ok {
+		log.Println("X2 Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	y2,ok :=getURLArgumentInt(r,"y2")
+	if !ok {
+		log.Println("Y2 Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
 	ystart := int(math.Min(float64(y1),float64(y2)))
 	xstart := int(math.Min(float64(x1),float64(x2)))
 	xsize :=int(math.Abs(float64(x2)-float64(x1)))
 	ysize :=int(math.Abs(float64(y2)-float64(y1)))
-	outxsize  :=getURLArgumentInt(r,"outxsize")
-	outysize  :=getURLArgumentInt(r,"outysize")
-	transform :=getURLArgumentString(r,"transform")
-	outputFmt :=getURLArgumentString(r,"outfmt")
-	if outputFmt == "" {
-		outputFmt = file_format
-	}
-	//zmin :=getURLArgumentInt(r,"zmin")
-	//zmax :=getURLArgumentInt(r,"zmax")
-	//colormap :=getURLArgumentString(r,"colormap")
 
-	fmt.Println("params: ", xstart, ystart, xsize, ysize, outxsize, outysize)
+	outxsize,ok  :=getURLArgumentInt(r,"outxsize")
+	if !ok {
+		log.Println("outxsize Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	
+	outysize,ok :=getURLArgumentInt(r,"outysize")
+	if !ok {
+		log.Println("outysize Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	transform,ok :=getURLArgumentString(r,"transform")
+	if !ok {
+		log.Println("transform Missing. Required Field")
+		w.WriteHeader(400)
+		return 
+	}
+	outputFmt,ok :=getURLArgumentString(r,"outfmt")
+	if !ok {
+		log.Println("Outformat Not Specified. Setting Equal to Input Format")
+		outputFmt = file_format
+ 
+	}
+
+	fmt.Println("Reported file_data_size", file_data_size)
+
+
+	zminInt,zminSet := getURLArgumentInt(r,"zmin")
+	var zmin float64
+	if !zminSet {
+		log.Println("Zmin Not Specified. Will estimate from file Selection")
+		zmin=0
+	} else {
+		zmin=float64(zminInt)
+	}
+	
+	zmaxInt,zmaxSet := getURLArgumentInt(r,"zmax")
+	var zmax float64
+	if !zmaxSet {
+		log.Println("Zmax Not Specified. Will estimate from file Selection")
+		zmax= 0
+	} else {
+		zmax=float64(zmaxInt)
+	}
+
+	zset := (zmaxSet && zminSet)
+	colorMap,ok :=getURLArgumentString(r,"colormap")
+	if !ok {
+		log.Println("colorMap Not Specified.Defaulting to RampColormap")
+		colorMap = "RampColormap"
+	}
+
+
+	fmt.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
 	start := time.Now()
-	data:=processRequest(file_name ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt) 
+	data:=processRequest(file_name ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
 	elapsed := time.Since(start)
 	fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
+
+	if !zset {
+		zmin = fileZMin
+		zmax = fileZMax
+	} 
+
+	// Create a Return header with some metadata in it.
+	outxsizeStr := strconv.Itoa(outxsize)
+	outysizeStr := strconv.Itoa(outysize)
+	w.Header().Add("Access-Control-Allow-Origin" ,"*")
+	w.Header().Add("outxsize" ,outxsizeStr)
+	w.Header().Add("outysize" ,outysizeStr)
+	w.Header().Add("zmin" ,fmt.Sprintf("%.0f",zmin))
+	w.Header().Add("zmax" ,fmt.Sprintf("%.0f",zmax))
+	w.Header().Add("filexstart", fmt.Sprintf("%f",filexstart))
+	w.Header().Add("filexdelta",fmt.Sprintf("%f",filexdelta))
+	w.Header().Add("fileystart",fmt.Sprintf("%f",fileystart))
+	w.Header().Add("fileydelta",fmt.Sprintf("%f",fileydelta))
+	w.WriteHeader(http.StatusOK)
 
     w.Write(data)
 }

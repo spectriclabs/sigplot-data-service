@@ -1,5 +1,6 @@
 import struct
 #import numpy
+import time
 
 def pack_list(data_list,file_format):
     
@@ -25,23 +26,25 @@ def make_2d_data(x,y,file_format):
         data.append([])
         if (yy % 25) == 0:
             for xx in range(x):
-                data[yy].append(yy)
+                data[yy].append(abs(yy) % 127)
                 if complex_file: #If data is complex, create another entry of the same value. 
-                    data[yy].append(yy)
+                    data[yy].append((yy) % 100)
+
         else:
             for xx in range(x):
-                data[yy].append(xx-yy)
+                data[yy].append((xx-yy)%127)
                 if complex_file: #If data is complex, create another entry of the same value. 
-                    data[yy].append(xx-yy)
+                    data[yy].append((xx-yy)%127)
     return data 
 
 if __name__ == "__main__":
-    xfile = 500
-    yfile = 1000
-    file_format = "CF"
+    xfile = 8192
+    yfile = 50000
+    file_format = "SB"
     data = make_2d_data(xfile,yfile,file_format)
     f= open("mydata_%s_%s_%s" %(file_format,xfile,yfile),"w+")
     for datalist in data:
+       # time.sleep(0.1)
         binarydata = pack_list(datalist,file_format)
         f.write(binarydata)
 
