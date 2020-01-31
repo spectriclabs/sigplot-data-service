@@ -16,10 +16,14 @@ import (
 	"flag"
 	"runtime/pprof"
 	"unsafe"
+	"encoding/json"
+	//"sync"
 )
 
 var fileZMin float64
 var fileZMax float64
+
+//func makeRGBOutputValue(colorPalette []colorpoint, )
 
 func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,colorMap string) []byte {
 	dataOut := new(bytes.Buffer)
@@ -70,7 +74,6 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 			check(err)      
 
 		case "L":
-			fmt.Println("Processing for Type L")
 			var numSlice=make([]int32,len(dataIn))
 			for i:=0;i<len(numSlice);i++ {
 				numSlice[i] = int32(dataIn[i])
@@ -221,33 +224,43 @@ func get_file_type_info(file_format string) (int,bool){
 	return bytes_per_atom,complex_flag
 }
 
-func down_sample_line_inx(datain []float64, outxsize int,transform string) []float64 {
+func down_sample_line_inx(datain []float64, outxsize int,transform string,outData []float64,outLineNum int) {
 	//var inputysize int =len(datain)/framesize
 	var xelementsperoutput float64  
-	xelementsperoutput = float64(len(datain)/outxsize)
+	xelementsperoutput = float64(len(datain))/float64(outxsize)
+	//var thinxdata = make([]float64,outxsize)
+	if xelementsperoutput>1 {
 
-	var xelementsperoutput_ceil int = int(math.Ceil(xelementsperoutput))
-	//fmt.Println("x thin" ,xelementsperoutput,xelementsperoutput_ceil,len(datain),outxsize)
-	var thinxdata = make([]float64,outxsize)
-	for x:=0; x<outxsize;x++ {
-		var startelement int 
-		var endelement int
-		if x != (outxsize-1) {
-			startelement  = x*int(math.Round(xelementsperoutput))
-			endelement  = startelement + xelementsperoutput_ceil
-			
-		} else{
-			endelement  =  len(datain)
-			startelement  = endelement - xelementsperoutput_ceil
+		var xelementsperoutput_ceil int = int(math.Ceil(xelementsperoutput))
+		//fmt.Println("x thin" ,xelementsperoutput,xelementsperoutput_ceil,len(datain),outxsize)
+
+		for x:=0; x<outxsize;x++ {
+			var startelement int 
+			var endelement int
+			if x != (outxsize-1) {
+				startelement  = int(math.Round(float64(x)*xelementsperoutput))
+				endelement  = startelement + xelementsperoutput_ceil
+				
+			} else{
+				endelement  =  len(datain)
+				startelement  = endelement - xelementsperoutput_ceil
+			}
+
+			//fmt.Println("x thin" , x,xelementsperoutput,len(datain),outxsize,startelement,endelement)
+			//out_data[x] =doTransform(datain[startelement:endelement],transform)
+			//fmt.Println("thinxdata[x]", thinxdata[x])
+			outData[outLineNum*outxsize+x]=doTransform(datain[startelement:endelement],transform)
+
 		}
+	} else { // Expand Data by repeating input values into output
 
-		//fmt.Println("x thin" , x,outxsize,startelement,endelement)
-		thinxdata[x] =doTransform(datain[startelement:endelement],transform)
-		//fmt.Println("thinxdata[x]", thinxdata[x])
-
+		for x:=0; x<outxsize; x++ {
+			index:= int(math.Floor(float64(x)*xelementsperoutput))
+			outData[outLineNum*outxsize+x]=datain[index]
+		}
 	}
-	
-	return thinxdata
+	//copy(outData[outLineNum*outxsize:],out_data)
+	//return thinxdata
 }
 
 func downSampleLineInY(datain []float64, outxsize int,transform string) []float64 {
@@ -274,10 +287,10 @@ func check(e error) {
 }
 
 
-func get_bytes_from_file(file_name string,first_byte int,numbytes int) []byte{
+func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
 
 	out_data := make([]byte,numbytes)
-	file,err :=os.Open(file_name)
+	file,err :=os.Open(fileName)
 	check(err)
 	offset,err:=file.Seek(int64(first_byte),0)
 	if offset !=int64(first_byte) {
@@ -306,7 +319,7 @@ func apply_cxmode(datain []float64,cxmode string) []float64{
 
 }
 
-func processline(outChannel chan []float64, file_name string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string) {
+func processline(outData []float64,outLineNum int, done chan bool,fileName string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string,zet bool) {
 
 	bytes_per_atom,complex_flag := get_file_type_info(file_format)
 	//fmt.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
@@ -318,14 +331,20 @@ func processline(outChannel chan []float64, file_name string, file_format string
 	
 	first_byte := file_data_offset +((ystart*fileXSize+xstart)*bytes_per_element)
 	//fmt.Println("file Read info " ,ystart,xstart, first_byte ,bytes_length)
-	filedata := get_bytes_from_file(file_name ,first_byte ,bytes_length)
+	filedata := get_bytes_from_file(fileName ,first_byte ,bytes_length)
 	data_to_process :=convert_file_data(filedata,file_format)
 
-	localMax := floats.Max(data_to_process[:])
-	fileZMax = math.Max(fileZMax,localMax)
+	// Finding the max and min of data we processed to get a zmax and zmin if they are not set. 
+	// Profiling suggests this is computationally intense.
+	if !zet {
+		localMax := floats.Max(data_to_process[:])
+		fileZMax = math.Max(fileZMax,localMax)
+	
+		localMin := floats.Min(data_to_process[:])
+		fileZMin = math.Min(fileZMin,localMin)
 
-	localMin := floats.Min(data_to_process[:])
-	fileZMin = math.Min(fileZMin,localMin)
+	}
+
 
 	var real_data []float64
 	if complex_flag {
@@ -333,14 +352,16 @@ func processline(outChannel chan []float64, file_name string, file_format string
 	} else {
 		real_data=data_to_process
 	}
-	out_data:=down_sample_line_inx(real_data,outxsize,transform)
+	//fmt.Println("processline", (outxsize),len(real_data),xsize)
+	//out_data :=make([]float64,outxsize)
+	down_sample_line_inx(real_data,outxsize,transform,outData,outLineNum)
 
-	//fmt.Println("processline", len(out_data))
-	outChannel<- out_data
-
+	//copy(outData[outLineNum*outxsize:],out_data)
+	//fmt.Println("processline Done", len(out_data))
+	done <- true
 }
 
-func processRequest(file_name string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
+func processRequest(fileName string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize)/float64(outysize)
@@ -366,27 +387,27 @@ func processRequest(file_name string,file_format string,fileDataOffset int,fileX
 		numLines := endLine - startLine
 
 		// Make channels to collect the data from processing all the lines in parallel. 
-		var chans [100]chan []float64
+		//var chans [100]chan []float64
+		chans := make([]chan []float64,numLines)
 		for i:=range chans {
 			chans[i] = make(chan []float64)
 		}
-		var xThinData []float64
+		xThinData :=make([]float64,numLines*outxsize)
 		//fmt.Println("Going to Process Input Lines", startLine, endLine)
 
+		//var wg sync.WaitGroup
+		//wg.Add(1)
+		done :=make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine:=startLine;inputLine<endLine;inputLine++ {
-			go processline(chans[inputLine-startLine],file_name,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform)
+			go processline(xThinData,inputLine-startLine,done,fileName,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform,zset)
 
 		}
-
-		// Pull Data out of concurrent channels in order into input arrary.
+		//Wait until all the lines have finished before moving on
 		for i:=0; i<numLines; i++ {
-			data := <-chans[i]
-			for j:=0; j<len(data); j++{
-				xThinData = append(xThinData,data[j])
-			}
+			<-done
 		}
-		
+
 		// Thin in y direction the subsset of lines that have now been processed in x
 		yThinData:=downSampleLineInY(xThinData,outxsize,transform)
 		//fmt.Println("Thin Y data is currently ", len(yThinData))
@@ -432,25 +453,21 @@ func getURLArgumentString(r *http.Request,keyname string) (string,bool) {
 	return keys[0],true
 } 
 
-type server struct{}
+type rdsServer struct{}
 
-func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	file_name,ok  :=getURLArgumentString(r,"filename")
-	if !ok {
-		log.Println("Filename Missing. Required Field")
-		w.WriteHeader(400)
-		return 
-	}
+	pathData := strings.Split(r.URL.Path, "/")
+	fileName :=pathData[2]
 
 	var file_format string 
 	var file_type int 
 	var fileXSize int 
 	var filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size float64
 	var fileDataOffset int
-	if strings.Contains(file_name,".tmp") {
+	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
 		log.Println("Processing File as Blue File")
-		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(file_name)
+		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(fileName)
 		fileDataOffset  = int(data_offset)
 		if file_type !=2000 {
 			log.Println("Only Supports type 2000 Bluefiles")
@@ -458,9 +475,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return 
 		}
 
-	} else if strings.Count(file_name,"_")==3 {
+	} else if strings.Count(fileName,"_")==3 {
 		log.Println("Processing File as binary file with metadata in filename with underscores")
-		fileData := strings.Split(file_name, "_")
+		fileData := strings.Split(fileName, "_")
 		// Need to get these parameters from file metadata
 		file_format  = fileData[1]
 		fileDataOffset  = 0
@@ -565,7 +582,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
 	start := time.Now()
-	data:=processRequest(file_name ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
+	data:=processRequest(fileName ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
 	elapsed := time.Since(start)
 	fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
 
@@ -592,6 +609,134 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
+type fileHeaderServer struct{}
+func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	//w.Header().Add("fileydelta",fmt.Sprintf("%f",fileydelta))
+
+	//fileName,ok  :=getURLArgumentString(r,"filename")
+	//if !ok {
+	//	log.Println("Filename Missing. Required Field")
+	//	w.WriteHeader(400)
+	//	return 
+	//}
+	pathData := strings.Split(r.URL.Path, "/")
+	fileName :=pathData[2]
+	var bluefileheader BlueHeader
+	var returnbytes []byte
+	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
+
+		file,err :=os.Open(fileName)
+		if err !=nil {
+			log.Println("Error Opening File", err)
+			w.WriteHeader(400)
+			return 
+		}
+		binary.Read(file,binary.LittleEndian,&bluefileheader)
+
+		var blueShort BlueHeaderShortenedFields
+		blueShort.Version = string(bluefileheader.Version[:])
+		blueShort.Head_rep = string(bluefileheader.Head_rep[:])
+		blueShort.Data_rep = string(bluefileheader.Data_rep[:])
+		blueShort.Detached = bluefileheader.Detached
+		blueShort.Protected = bluefileheader.Protected
+		blueShort.Pipe = bluefileheader.Pipe
+		blueShort.Ext_start = bluefileheader.Ext_start
+		blueShort.Data_start = bluefileheader.Data_start
+		blueShort.Data_size = bluefileheader.Data_size		
+		blueShort.Format = string(bluefileheader.Format[:])
+		blueShort.Flagmask = bluefileheader.Flagmask
+		blueShort.Timecode = bluefileheader.Timecode
+		blueShort.Xstart = bluefileheader.Xstart
+		blueShort.Xdelta = bluefileheader.Xdelta
+		blueShort.Xunits = bluefileheader.Xunits
+		blueShort.Subsize = bluefileheader.Subsize
+		blueShort.Ystart = bluefileheader.Ystart
+		blueShort.Ydelta = bluefileheader.Ydelta
+		blueShort.Yunits = bluefileheader.Yunits
+		
+		//Calculated Fields
+		SPA :=make(map[string]int)
+		SPA["S"] = 1
+		SPA["C"] = 2
+		SPA["V"] = 3
+		SPA["Q"] = 4
+		SPA["M"]= 9
+		SPA["X"]=10
+		SPA["T"]=16
+		SPA["U"]=1
+		SPA["1"]=1
+		SPA["2"]=2
+		SPA["3"]=3
+		SPA["4"]=4
+		SPA["5"]=5
+		SPA["6"]=6
+		SPA["7"]=7
+		SPA["8"]=8
+		SPA["9"]=9
+
+		BPS :=make(map[string]float64)
+		BPS["P"]= 0.125
+		BPS["A"]=  1
+		BPS["O"]=  1
+		BPS["B"]=  1
+		BPS["I"]=  2
+		BPS["L"]=  4
+		BPS["X"]=  8
+		BPS["F"]=  4
+		BPS["D"]=  8
+
+		blueShort.Spa = SPA[string(blueShort.Format[0])]
+		blueShort.Bps = BPS[string(blueShort.Format[1])]
+		blueShort.Bpa = float64(blueShort.Spa) * blueShort.Bps
+		blueShort.Ape = int(blueShort.Subsize)
+		blueShort.Bpe = float64(blueShort.Ape) * blueShort.Bpa
+		blueShort.Size = int(blueShort.Data_size / (blueShort.Bpa * float64(blueShort.Ape)))
+
+
+		var marshalError error
+		returnbytes,marshalError =json.Marshal(blueShort)
+		if err !=nil {
+			log.Println("Problem Marshalling Header to JSON ", marshalError)
+			w.WriteHeader(400)
+			return 
+		}
+
+	} else {
+		log.Println("Can only Return Headers for Blue Files. Looking for .tmp or .prm")
+		w.WriteHeader(400)
+		return 
+	}
+	w.Header().Add("Access-Control-Allow-Origin" ,"*")
+	w.WriteHeader(http.StatusOK)
+
+    w.Write(returnbytes)
+}
+
+type routerServer struct{}
+func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	//Valid url is /sds/<filename>/rds or //Valid url is /sds/<filename>
+	rdsServer := &rdsServer{}
+	headerServer := &fileHeaderServer{}
+	pathData := strings.Split(r.URL.Path, "/")
+	if len(pathData) > 4 {
+		log.Println("Invalid URL")
+		w.WriteHeader(400)
+		return 
+	}
+
+	if pathData[len(pathData)-1] == "rds" { //Valid url is /sds/<filename>/rds
+		rdsServer.ServeHTTP(w,r)
+	}else {
+		if len(pathData) > 3 { //Valid url is /sds/<filename>
+			log.Println("Invalid URL")
+			w.WriteHeader(400)
+			return 
+		}
+		headerServer.ServeHTTP(w,r)
+	}
+
+}
+
 func main() {
     flag.Parse()
     if *cpuprofile != "" {
@@ -604,12 +749,12 @@ func main() {
 	}
 	
 	//Used to profile speed
-	// start := time.Now()
-	// data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,100,250,"mean","SI") 
-	// elapsed := time.Since(start)
-	// fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
+	//start := time.Now()
+	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap") 
+	//elapsed := time.Since(start)
+	//fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
 
-    s := &server{}
-    http.Handle("/sds", s)
+	s := &routerServer{}
+	http.Handle("/sds/", s)
     log.Fatal(http.ListenAndServe(":5055", nil))
 }
