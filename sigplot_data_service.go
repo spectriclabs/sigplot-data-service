@@ -27,9 +27,11 @@ var fileZMax float64
 // Configuration Struct for Configuraion File
 type Configuration struct {
     Port            int `json:"port"`
-    FileLocationPath   string `json:"fileLocationPath"`
+    DataFileLocationPath   string `json:"dataFileLocationPath"`
 	CacheLocation 	string `json:"cacheLocation"`
 	Logfile 		string `json:"logfile"`
+	CacheMaxBytes int64 `json:"cacheMaxBytes"`
+	CheckCacheEvery int `json:"checkCacheEvery"`
 }
  var configuration Configuration
 
@@ -41,16 +43,10 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 	if fileFormatString=="RGBA" {
 		controlColors := getColorConrolPoints(colorMap)
 		colorPalette:=makeColorPalette(controlColors,numColors)
-		//log.Println("colorPalette 0 " ,colorPalette[0].red,colorPalette[0].green,colorPalette[0].blue)
-		//log.Println("colorPalette 1 " ,colorPalette[1].red,colorPalette[1].green,colorPalette[1].blue)
-		//log.Println("colorPalette 1 " ,colorPalette[2].red,colorPalette[2].green,colorPalette[2].blue)
 		colorsPerSpan := (zmax-zmin) / float64(numColors)
 		for i:=0;i<len(dataIn);i++ {
 			colorIndex:= math.Round((dataIn[i]-zmin)/colorsPerSpan)
 			colorIndex = math.Min(math.Max(colorIndex,0),float64(numColors-1)) //Ensure colorIndex is within the colorPalette
-			//r := uint32(math.Round((float64(colorPalette[int(colorIndex)].red)/65535)*float64(255)))
-			//g := uint32(math.Round((float64(colorPalette[int(colorIndex)].green)/65535)*float64(255)))
-			//b := uint32(math.Round((float64(colorPalette[int(colorIndex)].blue)/65535)*float64(255)))
 			a := 255
 			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].red))
 			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].green))
@@ -121,7 +117,7 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 func processBlueFileHeader(fileName string) (string,int,int,float64,float64,float64,float64,float64,float64) {
 
 	var bluefileheader BlueHeader
-	path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+	path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
 	log.Println("File Path: ", path)
 	file,err :=os.Open(path)
 	check(err)
@@ -301,7 +297,7 @@ func check(e error) {
 func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
 
 	out_data := make([]byte,numbytes)
-	path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+	path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
 	file,err :=os.Open(path)
 	check(err)
 	offset,err:=file.Seek(int64(first_byte),0)
@@ -471,6 +467,9 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	pathData := strings.Split(r.URL.Path, "/")
 	fileName :=pathData[2]
+	cacheFileName := urlToCacheFileName(r.URL.Path,r.URL.RawQuery)
+	var data []byte
+	var inCache bool
 
 	var file_format string 
 	var file_type int 
@@ -591,10 +590,16 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		colorMap = "RampColormap"
 	}
 
-
 	log.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
+
+	// Check if request has been previously processed and is in cache. If not process Request.
+	data,inCache = getItemFromCache(cacheFileName)
 	start := time.Now()
-	data:=processRequest(fileName ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
+	if !inCache {
+		data=processRequest(fileName ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
+		go putItemInCache(cacheFileName,data)
+	}
+
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
 
@@ -623,20 +628,13 @@ var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 type fileHeaderServer struct{}
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//w.Header().Add("fileydelta",fmt.Sprintf("%f",fileydelta))
 
-	//fileName,ok  :=getURLArgumentString(r,"filename")
-	//if !ok {
-	//	log.Println("Filename Missing. Required Field")
-	//	w.WriteHeader(400)
-	//	return 
-	//}
 	pathData := strings.Split(r.URL.Path, "/")
 	fileName :=pathData[2]
 	var bluefileheader BlueHeader
 	var returnbytes []byte
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
-		path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+		path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
 		log.Println("Opening File for file Header Mode " , path)
 		file,err :=os.Open(path)
 		if err !=nil {
@@ -788,6 +786,8 @@ func main() {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
 
+	// Launch a seperate routine to monitor the cache size
+	go checkCache(configuration.CacheLocation, configuration.CheckCacheEvery , configuration.CacheMaxBytes) 
 
 	// Serve up service on /sds
 	log.Println("Startup Server on Port: " , configuration.Port)
