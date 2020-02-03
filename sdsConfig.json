@@ -1,0 +1,6 @@
+{
+    "port": 5055,
+    "fileLocationPath": "./",
+	"cacheLocation": "./sdscache/",
+	"logfile": "./logs/sds.log"
+}

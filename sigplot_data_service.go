@@ -17,13 +17,22 @@ import (
 	"runtime/pprof"
 	"unsafe"
 	"encoding/json"
+	"github.com/tkanos/gonfig"
 	//"sync"
 )
 
 var fileZMin float64
 var fileZMax float64
 
-//func makeRGBOutputValue(colorPalette []colorpoint, )
+// Configuration Struct for Configuraion File
+type Configuration struct {
+    Port            int `json:"port"`
+    FileLocationPath   string `json:"fileLocationPath"`
+	CacheLocation 	string `json:"cacheLocation"`
+	Logfile 		string `json:"logfile"`
+}
+ var configuration Configuration
+
 
 func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,colorMap string) []byte {
 	dataOut := new(bytes.Buffer)
@@ -32,9 +41,9 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 	if fileFormatString=="RGBA" {
 		controlColors := getColorConrolPoints(colorMap)
 		colorPalette:=makeColorPalette(controlColors,numColors)
-		//fmt.Println("colorPalette 0 " ,colorPalette[0].red,colorPalette[0].green,colorPalette[0].blue)
-		//fmt.Println("colorPalette 1 " ,colorPalette[1].red,colorPalette[1].green,colorPalette[1].blue)
-		//fmt.Println("colorPalette 1 " ,colorPalette[2].red,colorPalette[2].green,colorPalette[2].blue)
+		//log.Println("colorPalette 0 " ,colorPalette[0].red,colorPalette[0].green,colorPalette[0].blue)
+		//log.Println("colorPalette 1 " ,colorPalette[1].red,colorPalette[1].green,colorPalette[1].blue)
+		//log.Println("colorPalette 1 " ,colorPalette[2].red,colorPalette[2].green,colorPalette[2].blue)
 		colorsPerSpan := (zmax-zmin) / float64(numColors)
 		for i:=0;i<len(dataIn);i++ {
 			colorIndex:= math.Round((dataIn[i]-zmin)/colorsPerSpan)
@@ -48,10 +57,10 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].blue))
 			dataOut.WriteByte(byte(a))
 		}
-	//fmt.Println("out_data RGBA" , len(dataOut.Bytes()))
+	//log.Println("out_data RGBA" , len(dataOut.Bytes()))
 	return dataOut.Bytes()
 	} else {
-		//fmt.Println("Processing for Type ",fileFormatString)
+		//log.Println("Processing for Type ",fileFormatString)
 		switch string(fileFormatString[1]) {
 		case "B":
 			var numSlice=make([]int8,len(dataIn))
@@ -103,7 +112,7 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 		
 			check(err)  
 		}
-	//fmt.Println("out_data" , len(dataOut.Bytes()))
+	//log.Println("out_data" , len(dataOut.Bytes()))
 	return dataOut.Bytes()
 	}
 
@@ -112,7 +121,9 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 func processBlueFileHeader(fileName string) (string,int,int,float64,float64,float64,float64,float64,float64) {
 
 	var bluefileheader BlueHeader
-	file,err :=os.Open(fileName)
+	path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+	log.Println("File Path: ", path)
+	file,err :=os.Open(path)
 	check(err)
 	binary.Read(file,binary.LittleEndian,&bluefileheader)
 	//num_read,err:=file.Read(bluefileheader)
@@ -127,7 +138,7 @@ func processBlueFileHeader(fileName string) (string,int,int,float64,float64,floa
 	data_start:=bluefileheader.Data_start
 	data_size:=bluefileheader.Data_size
 
-	fmt.Println("header data" , fileFormat,file_type,subsize)
+	log.Println("header data" , fileFormat,file_type,subsize)
 
 	return fileFormat,file_type,subsize,xstart,xdelta,ystart,ydelta,data_start,data_size
 }
@@ -180,7 +191,7 @@ func convert_file_data(bytesin []byte,file_formatstring string) []float64 {
 		}
 
 	}
-	//fmt.Println("out_data" , len(out_data))
+	//log.Println("out_data" , len(out_data))
 	return out_data
 
 }
@@ -202,13 +213,13 @@ func doTransform(dataIn []float64,transform string) float64 {
 }
 
 func get_file_type_info(file_format string) (int,bool){
-	//fmt.Println("file_format", file_format)
+	//log.Println("file_format", file_format)
 	var complex_flag bool= false
 	var bytes_per_atom int= 1
 	if string(file_format[0]) =="C" {
 		complex_flag=true
 	} 
-	//fmt.Println("string(file_format[1])", string(file_format[1]))
+	//log.Println("string(file_format[1])", string(file_format[1]))
 	switch string(file_format[1]) {
 	case "B":
 		bytes_per_atom = 1
@@ -232,7 +243,7 @@ func down_sample_line_inx(datain []float64, outxsize int,transform string,outDat
 	if xelementsperoutput>1 {
 
 		var xelementsperoutput_ceil int = int(math.Ceil(xelementsperoutput))
-		//fmt.Println("x thin" ,xelementsperoutput,xelementsperoutput_ceil,len(datain),outxsize)
+		//log.Println("x thin" ,xelementsperoutput,xelementsperoutput_ceil,len(datain),outxsize)
 
 		for x:=0; x<outxsize;x++ {
 			var startelement int 
@@ -246,9 +257,9 @@ func down_sample_line_inx(datain []float64, outxsize int,transform string,outDat
 				startelement  = endelement - xelementsperoutput_ceil
 			}
 
-			//fmt.Println("x thin" , x,xelementsperoutput,len(datain),outxsize,startelement,endelement)
+			//log.Println("x thin" , x,xelementsperoutput,len(datain),outxsize,startelement,endelement)
 			//out_data[x] =doTransform(datain[startelement:endelement],transform)
-			//fmt.Println("thinxdata[x]", thinxdata[x])
+			//log.Println("thinxdata[x]", thinxdata[x])
 			outData[outLineNum*outxsize+x]=doTransform(datain[startelement:endelement],transform)
 
 		}
@@ -266,12 +277,12 @@ func down_sample_line_inx(datain []float64, outxsize int,transform string,outDat
 func downSampleLineInY(datain []float64, outxsize int,transform string) []float64 {
 
 	numLines := len(datain) / outxsize
-	//fmt.Println("len(datain),outxsize" ,len(datain),outxsize) 
+	//log.Println("len(datain),outxsize" ,len(datain),outxsize) 
 	processSlice:=make([]float64,numLines)
 	outData:=make([]float64,outxsize)
 	for x:=0;x<outxsize;x++ {
 		for y:=0;y<numLines;y++ {
-			//fmt.Println("y thin" ,y,outxsize,x) 
+			//log.Println("y thin" ,y,outxsize,x) 
 			processSlice[y] = datain[y*outxsize+x]
 		}
 		outData[x] = doTransform(processSlice[:],transform)
@@ -290,7 +301,8 @@ func check(e error) {
 func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
 
 	out_data := make([]byte,numbytes)
-	file,err :=os.Open(fileName)
+	path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+	file,err :=os.Open(path)
 	check(err)
 	offset,err:=file.Seek(int64(first_byte),0)
 	if offset !=int64(first_byte) {
@@ -302,7 +314,7 @@ func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
 	if num_read !=numbytes {
 		panic ("Failed to Read Requested Bytes")
 	}
-	//fmt.Println("Read Data Line" , len(out_data))
+	//log.Println("Read Data Line" , len(out_data))
 	return out_data
 
 }
@@ -322,7 +334,7 @@ func apply_cxmode(datain []float64,cxmode string) []float64{
 func processline(outData []float64,outLineNum int, done chan bool,fileName string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string,zet bool) {
 
 	bytes_per_atom,complex_flag := get_file_type_info(file_format)
-	//fmt.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
+	//log.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
 	bytes_per_element := bytes_per_atom
 	if complex_flag {
 		bytes_per_element = bytes_per_element*2
@@ -330,7 +342,7 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 	bytes_length := xsize*bytes_per_element
 	
 	first_byte := file_data_offset +((ystart*fileXSize+xstart)*bytes_per_element)
-	//fmt.Println("file Read info " ,ystart,xstart, first_byte ,bytes_length)
+	//log.Println("file Read info " ,ystart,xstart, first_byte ,bytes_length)
 	filedata := get_bytes_from_file(fileName ,first_byte ,bytes_length)
 	data_to_process :=convert_file_data(filedata,file_format)
 
@@ -352,12 +364,12 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 	} else {
 		real_data=data_to_process
 	}
-	//fmt.Println("processline", (outxsize),len(real_data),xsize)
+	//log.Println("processline", (outxsize),len(real_data),xsize)
 	//out_data :=make([]float64,outxsize)
 	down_sample_line_inx(real_data,outxsize,transform,outData,outLineNum)
 
 	//copy(outData[outLineNum*outxsize:],out_data)
-	//fmt.Println("processline Done", len(out_data))
+	//log.Println("processline Done", len(out_data))
 	done <- true
 }
 
@@ -369,13 +381,13 @@ func processRequest(fileName string,file_format string,fileDataOffset int,fileXS
 	
 	// Loop over the output Y Lines
 	for outputLine:=0;outputLine<outysize;outputLine++ {
-		//fmt.Println("Processing Output Line ", outputLine)
+		//log.Println("Processing Output Line ", outputLine)
 		// For Each Output Y line Read and process the required lines from the input file
 		var startLine int
 		var endLine int
 		
 		if outputLine != (outysize-1) {
-			//fmt.Println("Not Last Line. yLinesPerOutput
+			//log.Println("Not Last Line. yLinesPerOutput
 			startLine = ystart+int(math.Round(float64(outputLine)*yLinesPerOutput))
 			endLine = startLine + yLinesPerOutputCeil
 		} else { //Last OutputLine, use the last line and work backwards the lineperoutput
@@ -393,7 +405,7 @@ func processRequest(fileName string,file_format string,fileDataOffset int,fileXS
 			chans[i] = make(chan []float64)
 		}
 		xThinData :=make([]float64,numLines*outxsize)
-		//fmt.Println("Going to Process Input Lines", startLine, endLine)
+		//log.Println("Going to Process Input Lines", startLine, endLine)
 
 		//var wg sync.WaitGroup
 		//wg.Add(1)
@@ -410,13 +422,13 @@ func processRequest(fileName string,file_format string,fileDataOffset int,fileXS
 
 		// Thin in y direction the subsset of lines that have now been processed in x
 		yThinData:=downSampleLineInY(xThinData,outxsize,transform)
-		//fmt.Println("Thin Y data is currently ", len(yThinData))
+		//log.Println("Thin Y data is currently ", len(yThinData))
 
 		processedData = append(processedData,yThinData...)
-		//fmt.Println("processedData is currently ", len(processedData))
+		//log.Println("processedData is currently ", len(processedData))
 
 	}
-	//fmt.Println("Spot Check 0,49,50,99,:",processedData[0], processedData[49], processedData[50], processedData[99]) 
+	//log.Println("Spot Check 0,49,50,99,:",processedData[0], processedData[49], processedData[50], processedData[99]) 
 
 	if !zset {
 		zmin = fileZMin
@@ -551,7 +563,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
  
 	}
 
-	fmt.Println("Reported file_data_size", file_data_size)
+	log.Println("Reported file_data_size", file_data_size)
 
 
 	zminInt,zminSet := getURLArgumentInt(r,"zmin")
@@ -580,11 +592,11 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 
-	fmt.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
+	log.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
 	start := time.Now()
 	data:=processRequest(fileName ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
 	elapsed := time.Since(start)
-	fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
+	log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
 
 	if !zset {
 		zmin = fileZMin
@@ -624,8 +636,9 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var bluefileheader BlueHeader
 	var returnbytes []byte
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
-
-		file,err :=os.Open(fileName)
+		path:=fmt.Sprintf("%s%s", configuration.FileLocationPath,fileName)
+		log.Println("Opening File for file Header Mode " , path)
+		file,err :=os.Open(path)
 		if err !=nil {
 			log.Println("Error Opening File", err)
 			w.WriteHeader(400)
@@ -738,6 +751,8 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	//Used to profile speed
     flag.Parse()
     if *cpuprofile != "" {
         f, err := os.Create(*cpuprofile)
@@ -747,14 +762,38 @@ func main() {
         pprof.StartCPUProfile(f)
         defer pprof.StopCPUProfile()
 	}
-	
+
 	//Used to profile speed
 	//start := time.Now()
 	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap") 
 	//elapsed := time.Since(start)
-	//fmt.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
+	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed) 
 
+
+	// Load Configuration File
+	err := gonfig.GetConf("./sdsConfig.json", &configuration)
+	if err != nil {
+		log.Println("Error Reading Config File, ./sdsConfig.json :", err)
+		return
+	}
+
+	if configuration.Logfile !="" {
+		// Open and setup log file
+		logFile,err :=os.OpenFile(configuration.Logfile,os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Println("Error Reading logfile: ", configuration.Logfile, err)
+			return
+		}
+		log.SetOutput(logFile)
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
+	}
+
+
+	// Serve up service on /sds
+	log.Println("Startup Server on Port: " , configuration.Port)
 	s := &routerServer{}
 	http.Handle("/sds/", s)
-    log.Fatal(http.ListenAndServe(":5055", nil))
+	msg := ":%d"
+	result := fmt.Sprintf(msg, configuration.Port)
+    log.Fatal(http.ListenAndServe(result, nil))
 }
