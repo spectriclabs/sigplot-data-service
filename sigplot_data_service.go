@@ -18,20 +18,32 @@ import (
 	"unsafe"
 	"encoding/json"
 	"github.com/tkanos/gonfig"
+	//"github.com/gokyle/filecache"
 	//"sync"
 )
 
 var fileZMin float64
 var fileZMax float64
 
+type Location struct {
+	LocationName	string `json:"locationName"`
+	LocationType	string `json:"locationType"`
+	Path			string `json:"path"`
+	MinioBucket		string `json:"minioBucket"`
+	Location		string `json:"location"`
+	MinioAccessKey	string `json:"minioAccessKey"`
+	MinioSecretKey	string`json:"minioSecretKey"`
+}
+
 // Configuration Struct for Configuraion File
 type Configuration struct {
     Port            int `json:"port"`
-    DataFileLocationPath   string `json:"dataFileLocationPath"`
 	CacheLocation 	string `json:"cacheLocation"`
 	Logfile 		string `json:"logfile"`
 	CacheMaxBytes int64 `json:"cacheMaxBytes"`
 	CheckCacheEvery int `json:"checkCacheEvery"`
+	LocationDetails		[]Location `json:"locationDetails"`
+
 }
  var configuration Configuration
 
@@ -114,12 +126,10 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 
 }
 
-func processBlueFileHeader(fileName string) (string,int,int,float64,float64,float64,float64,float64,float64) {
+func processBlueFileHeader(filePath string) (string,int,int,float64,float64,float64,float64,float64,float64) {
 
 	var bluefileheader BlueHeader
-	path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
-	log.Println("File Path: ", path)
-	file,err :=os.Open(path)
+	file,err :=os.Open(filePath)
 	check(err)
 	binary.Read(file,binary.LittleEndian,&bluefileheader)
 	//num_read,err:=file.Read(bluefileheader)
@@ -297,8 +307,7 @@ func check(e error) {
 func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
 
 	out_data := make([]byte,numbytes)
-	path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
-	file,err :=os.Open(path)
+	file,err :=os.Open(fileName)
 	check(err)
 	offset,err:=file.Seek(int64(first_byte),0)
 	if offset !=int64(first_byte) {
@@ -369,7 +378,7 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 	done <- true
 }
 
-func processRequest(fileName string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
+func processRequest(fullFilepath string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize)/float64(outysize)
@@ -408,7 +417,7 @@ func processRequest(fileName string,file_format string,fileDataOffset int,fileXS
 		done :=make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine:=startLine;inputLine<endLine;inputLine++ {
-			go processline(xThinData,inputLine-startLine,done,fileName,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform,zset)
+			go processline(xThinData,inputLine-startLine,done,fullFilepath,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform,zset)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -461,12 +470,41 @@ func getURLArgumentString(r *http.Request,keyname string) (string,bool) {
 	return keys[0],true
 } 
 
+func getFilePath(url string) (string,string) {
+
+	pathData := strings.Split(url, "/")
+	locationName:= pathData[2]
+	var urlPath string = ""
+	for i:=3;i<len(pathData)-1;i++ {
+		urlPath=urlPath+pathData[i]+"/"
+	}
+
+
+	fileName :=pathData[len(pathData)-1]
+	log.Println("LocationName " ,locationName , "fileName" , fileName)
+	var currentLocation Location
+	for i:=range configuration.LocationDetails {
+		if configuration.LocationDetails[i].LocationName ==locationName {
+			currentLocation = configuration.LocationDetails[i]
+		}
+	}
+
+	if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
+		currentLocation.Path+="/"
+	}
+
+	fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
+	log.Println("LocationName=" ,locationName , "fileName=" , fileName, "fullPath=",fullFilepath)
+	return fileName,fullFilepath
+}
+
 type rdsServer struct{}
 
 func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	pathData := strings.Split(r.URL.Path, "/")
-	fileName :=pathData[2]
+	//pathData := strings.Split(r.URL.Path, "/")
+	//fileName :=pathData[2]
+	fileName,fullFilepath :=getFilePath(r.URL.Path)
 	cacheFileName := urlToCacheFileName(r.URL.Path,r.URL.RawQuery)
 	var data []byte
 	var inCache bool
@@ -478,7 +516,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var fileDataOffset int
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
 		log.Println("Processing File as Blue File")
-		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(fileName)
+		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(fullFilepath)
 		fileDataOffset  = int(data_offset)
 		if file_type !=2000 {
 			log.Println("Only Supports type 2000 Bluefiles")
@@ -596,7 +634,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	data,inCache = getItemFromCache(cacheFileName)
 	start := time.Now()
 	if !inCache {
-		data=processRequest(fileName ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
+		data=processRequest(fullFilepath ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
 		go putItemInCache(cacheFileName,data)
 	}
 
@@ -629,14 +667,14 @@ var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 type fileHeaderServer struct{}
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	pathData := strings.Split(r.URL.Path, "/")
-	fileName :=pathData[2]
+	fileName,fullFilepath :=getFilePath(r.URL.Path)
+
 	var bluefileheader BlueHeader
 	var returnbytes []byte
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
-		path:=fmt.Sprintf("%s%s", configuration.DataFileLocationPath,fileName)
-		log.Println("Opening File for file Header Mode " , path)
-		file,err :=os.Open(path)
+
+		log.Println("Opening File for file Header Mode " , fullFilepath)
+		file,err :=os.Open(fullFilepath)
 		if err !=nil {
 			log.Println("Error Opening File", err)
 			w.WriteHeader(400)
@@ -728,24 +766,24 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//Valid url is /sds/<filename>/rds or //Valid url is /sds/<filename>
 	rdsServer := &rdsServer{}
 	headerServer := &fileHeaderServer{}
-	pathData := strings.Split(r.URL.Path, "/")
-	if len(pathData) > 4 {
-		log.Println("Invalid URL")
+
+	mode,ok :=getURLArgumentString(r,"mode")
+	if !ok {
+		log.Println("Mode Missing. Required Field")
 		w.WriteHeader(400)
 		return 
 	}
 
-	if pathData[len(pathData)-1] == "rds" { //Valid url is /sds/<filename>/rds
+	switch mode {
+	case "rds": //Valid url is /sds/path/to/file/<filename>?mode=rds
 		rdsServer.ServeHTTP(w,r)
-	}else {
-		if len(pathData) > 3 { //Valid url is /sds/<filename>
-			log.Println("Invalid URL")
-			w.WriteHeader(400)
-			return 
-		}
+	case "hdr": //Valid url is /sds/path/to/file/<filename>?mode=hdr
 		headerServer.ServeHTTP(w,r)
+	default:
+		log.Println("Unknown Mode")
+		w.WriteHeader(400)
+		return 
 	}
-
 }
 
 func main() {
@@ -788,6 +826,8 @@ func main() {
 
 	// Launch a seperate routine to monitor the cache size
 	go checkCache(configuration.CacheLocation, configuration.CheckCacheEvery , configuration.CacheMaxBytes) 
+
+	log.Println("LocationsDetails Path: ", configuration.LocationDetails[0].Path)
 
 	// Serve up service on /sds
 	log.Println("Startup Server on Port: " , configuration.Port)

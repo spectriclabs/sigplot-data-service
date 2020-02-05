@@ -1,8 +1,27 @@
 {
     "port": 5055,
-    "dataFileLocationPath": "./",
 	"cacheLocation": "./sdscache/",
     "logfile": "./logs/sds.log",
     "cacheMaxBytes": 100000000,
-    "checkCacheEvery":60
+    "checkCacheEvery":60,
+    "locationDetails": [{
+                            "locationName":     "ServiceDir",
+                            "locationType":     "localFile",
+	                        "path":             "./",
+	                        "minioBucket":      "",
+	                        "location":         "",
+	                        "minioAccessKey":   "",
+	                        "minioSecretKey":   ""
+                        },
+                        {
+                            "locationName":     "ServiceDirData",
+                            "locationType":     "localFile",
+	                        "path":             "./data",
+	                        "minioBucket":      "",
+	                        "location":         "",
+	                        "minioAccessKey":   "",
+	                        "minioSecretKey":   ""
+                        }
+                        ]
+
 }
