@@ -21,6 +21,15 @@
 	                        "location":         "",
 	                        "minioAccessKey":   "",
 	                        "minioSecretKey":   ""
+                        },
+                        {
+                            "locationName":     "minio",
+                            "locationType":     "minio",
+	                        "path":             "",
+	                        "minioBucket":      "sdsdata",
+	                        "location":         "192.168.1.229:9000",
+	                        "minioAccessKey":   "minio",
+	                        "minioSecretKey":   "miniostorage"
                         }
                         ]
 

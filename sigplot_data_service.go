@@ -20,6 +20,7 @@ import (
 	"github.com/tkanos/gonfig"
 	"io"
 	"sync"
+	"github.com/minio/minio-go/v6"
 )
 
 var fileZMin float64
@@ -489,23 +490,40 @@ func openDataSource(url string) (io.ReadSeeker,string,bool) {
 	}
 
 
-	if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
-		currentLocation.Path+="/"
-	}
 
-	if currentLocation.LocationType == "localFile" {
-		fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
-		log.Println("Reading Local File. LocationName=" ,locationName , "fileName=" , fileName, "fullPath=",fullFilepath)
-		file,err := os.Open(fullFilepath)
-		if err!=nil {
-			log.Println("Error opening File,", err)
+
+	switch (currentLocation.LocationType) {
+		case "localFile":
+			if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
+				currentLocation.Path+="/"
+			}
+			fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
+			log.Println("Reading Local File. LocationName=" ,locationName , "fileName=" , fileName, "fullPath=",fullFilepath)
+			file,err := os.Open(fullFilepath)
+			if err!=nil {
+				log.Println("Error opening File,", err)
+				return nil,"",false
+			}
+			reader:= io.ReadSeeker(file)
+			return reader,fileName,true
+		case "minio":
+			minioClient, err := minio.New(currentLocation.Location, currentLocation.MinioAccessKey, currentLocation.MinioSecretKey, false)
+			if err != nil {
+				log.Println("Error Establishing Connection to Minio" , err)
+				return nil,"",false
+			}
+			fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
+			object, err := minioClient.GetObject(currentLocation.MinioBucket, fullFilepath, minio.GetObjectOptions{})
+			if err != nil {
+				log.Println("Error Getting object from Minio" , err)
+				return nil,"",false
+			}
+			reader:= io.ReadSeeker(object)
+			return reader,fileName,true
+
+		default: 
+			log.Println("Unsupported Location Type")
 			return nil,"",false
-		}
-		reader:= io.ReadSeeker(file)
-		return reader,fileName,true
-	} else {
-		log.Println("Unsupported Location Type")
-		return nil,"",false
 	}
 
 
