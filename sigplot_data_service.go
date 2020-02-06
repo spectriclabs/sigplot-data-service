@@ -18,12 +18,13 @@ import (
 	"unsafe"
 	"encoding/json"
 	"github.com/tkanos/gonfig"
-	//"github.com/gokyle/filecache"
-	//"sync"
+	"io"
+	"sync"
 )
 
 var fileZMin float64
 var fileZMax float64
+var ioMutex = &sync.Mutex{}
 
 type Location struct {
 	LocationName	string `json:"locationName"`
@@ -126,13 +127,10 @@ func createOutput(dataIn []float64,fileFormatString string,zmin,zmax float64,col
 
 }
 
-func processBlueFileHeader(filePath string) (string,int,int,float64,float64,float64,float64,float64,float64) {
+func processBlueFileHeader(reader io.ReadSeeker) (string,int,int,float64,float64,float64,float64,float64,float64) {
 
 	var bluefileheader BlueHeader
-	file,err :=os.Open(filePath)
-	check(err)
-	binary.Read(file,binary.LittleEndian,&bluefileheader)
-	//num_read,err:=file.Read(bluefileheader)
+	binary.Read(reader,binary.LittleEndian,&bluefileheader)
 
 	fileFormat:=string(bluefileheader.Format[:])
 	file_type :=int(bluefileheader.File_type)
@@ -303,24 +301,31 @@ func check(e error) {
     }
 }
 
+//file,err :=os.Open(fileName)
+//reader := io.ReaderAt(file)
+//check(err)
+// offset,err:=file.Seek(int64(first_byte),0)
+// if offset !=int64(first_byte) {
+// 	panic ("Failed to Seek")
+// }
+// check(err)
+// num_read,err:=file.Read(out_data)
 
-func get_bytes_from_file(fileName string,first_byte int,numbytes int) []byte{
+func getBytesFromReader(reader io.ReadSeeker,firstByte int,numbytes int) ([]byte,bool){
 
-	out_data := make([]byte,numbytes)
-	file,err :=os.Open(fileName)
-	check(err)
-	offset,err:=file.Seek(int64(first_byte),0)
-	if offset !=int64(first_byte) {
-		panic ("Failed to Seek")
-	}
-	check(err)
-	num_read,err:=file.Read(out_data)
-	check(err)
-	if num_read !=numbytes {
-		panic ("Failed to Read Requested Bytes")
+	outData := make([]byte,numbytes)
+
+	ioMutex.Lock() //Multiple Concurrent goroutines will use this function with the same reader. 
+	reader.Seek(int64(firstByte),io.SeekStart)
+	numRead,err:= reader.Read(outData)
+	ioMutex.Unlock()
+
+	if numRead !=numbytes || err != nil {
+		log.Println("Failed to Read Requested Bytes")
+		return outData,false
 	}
 	//log.Println("Read Data Line" , len(out_data))
-	return out_data
+	return outData,true
 
 }
 
@@ -336,7 +341,7 @@ func apply_cxmode(datain []float64,cxmode string) []float64{
 
 }
 
-func processline(outData []float64,outLineNum int, done chan bool,fileName string, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string,zet bool) {
+func processline(outData []float64,outLineNum int, done chan bool,reader io.ReadSeeker, file_format string,file_data_offset int,fileXSize int,xstart int, ystart int,xsize int,outxsize int,transform string,zet bool) {
 
 	bytes_per_atom,complex_flag := get_file_type_info(file_format)
 	//log.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
@@ -348,7 +353,9 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 	
 	first_byte := file_data_offset +((ystart*fileXSize+xstart)*bytes_per_element)
 	//log.Println("file Read info " ,ystart,xstart, first_byte ,bytes_length)
-	filedata := get_bytes_from_file(fileName ,first_byte ,bytes_length)
+	filedata,_ := getBytesFromReader(reader,first_byte ,bytes_length)
+
+	//filedata := get_bytes_from_file(fileName ,first_byte ,bytes_length)
 	data_to_process :=convert_file_data(filedata,file_format)
 
 	// Finding the max and min of data we processed to get a zmax and zmin if they are not set. 
@@ -361,7 +368,6 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 		fileZMin = math.Min(fileZMin,localMin)
 
 	}
-
 
 	var real_data []float64
 	if complex_flag {
@@ -378,7 +384,7 @@ func processline(outData []float64,outLineNum int, done chan bool,fileName strin
 	done <- true
 }
 
-func processRequest(fullFilepath string,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
+func processRequest(reader io.ReadSeeker,file_format string,fileDataOffset int,fileXSize int,xstart int, ystart int, xsize int,ysize int, outxsize int, outysize int, transform string,outputFmt string,zmin,zmax float64,zset bool,colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize)/float64(outysize)
@@ -412,12 +418,10 @@ func processRequest(fullFilepath string,file_format string,fileDataOffset int,fi
 		xThinData :=make([]float64,numLines*outxsize)
 		//log.Println("Going to Process Input Lines", startLine, endLine)
 
-		//var wg sync.WaitGroup
-		//wg.Add(1)
 		done :=make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine:=startLine;inputLine<endLine;inputLine++ {
-			go processline(xThinData,inputLine-startLine,done,fullFilepath,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform,zset)
+			go processline(xThinData,inputLine-startLine,done,reader,file_format,fileDataOffset,fileXSize,xstart,inputLine,xsize,outxsize,transform,zset)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -433,14 +437,12 @@ func processRequest(fullFilepath string,file_format string,fileDataOffset int,fi
 		//log.Println("processedData is currently ", len(processedData))
 
 	}
-	//log.Println("Spot Check 0,49,50,99,:",processedData[0], processedData[49], processedData[50], processedData[99]) 
 
 	if !zset {
 		zmin = fileZMin
 		zmax = fileZMax
 	} 
 
-	//var outData=make([]byte,len(processedData))
 	outData:=createOutput(processedData,outputFmt,zmin,zmax,colorMap)
 	return outData
 }
@@ -449,7 +451,6 @@ func getURLArgumentInt(r *http.Request,keyname string) (int,bool) {
 	keys, ok := r.URL.Query()[keyname]
     
     if !ok || len(keys[0]) < 1 {
-    //    log.Println("Url Param ",keyname, "  is missing")
         return 0,false
 	}
 	retval,err := strconv.Atoi(keys[0])
@@ -464,13 +465,12 @@ func getURLArgumentString(r *http.Request,keyname string) (string,bool) {
 	keys, ok := r.URL.Query()[keyname]
     
     if !ok || len(keys[0]) < 1 {
-       // log.Println("Url Param ",keyname, "  is missing")
         return "",false
 	}
 	return keys[0],true
 } 
 
-func getFilePath(url string) (string,string) {
+func openDataSource(url string) (io.ReadSeeker,string,bool) {
 
 	pathData := strings.Split(url, "/")
 	locationName:= pathData[2]
@@ -481,7 +481,6 @@ func getFilePath(url string) (string,string) {
 
 
 	fileName :=pathData[len(pathData)-1]
-	log.Println("LocationName " ,locationName , "fileName" , fileName)
 	var currentLocation Location
 	for i:=range configuration.LocationDetails {
 		if configuration.LocationDetails[i].LocationName ==locationName {
@@ -489,22 +488,38 @@ func getFilePath(url string) (string,string) {
 		}
 	}
 
+
 	if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
 		currentLocation.Path+="/"
 	}
 
-	fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
-	log.Println("LocationName=" ,locationName , "fileName=" , fileName, "fullPath=",fullFilepath)
-	return fileName,fullFilepath
+	if currentLocation.LocationType == "localFile" {
+		fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
+		log.Println("Reading Local File. LocationName=" ,locationName , "fileName=" , fileName, "fullPath=",fullFilepath)
+		file,err := os.Open(fullFilepath)
+		if err!=nil {
+			log.Println("Error opening File,", err)
+			return nil,"",false
+		}
+		reader:= io.ReadSeeker(file)
+		return reader,fileName,true
+	} else {
+		log.Println("Unsupported Location Type")
+		return nil,"",false
+	}
+
+
 }
 
 type rdsServer struct{}
 
 func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	//pathData := strings.Split(r.URL.Path, "/")
-	//fileName :=pathData[2]
-	fileName,fullFilepath :=getFilePath(r.URL.Path)
+	reader,fileName,succeed :=openDataSource(r.URL.Path)
+	if !succeed {
+		w.WriteHeader(400)
+		return 
+	}
 	cacheFileName := urlToCacheFileName(r.URL.Path,r.URL.RawQuery)
 	var data []byte
 	var inCache bool
@@ -516,7 +531,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var fileDataOffset int
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
 		log.Println("Processing File as Blue File")
-		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(fullFilepath)
+		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(reader)
 		fileDataOffset  = int(data_offset)
 		if file_type !=2000 {
 			log.Println("Only Supports type 2000 Bluefiles")
@@ -634,7 +649,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	data,inCache = getItemFromCache(cacheFileName)
 	start := time.Now()
 	if !inCache {
-		data=processRequest(fullFilepath ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
+		data=processRequest(reader ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
 		go putItemInCache(cacheFileName,data)
 	}
 
@@ -667,20 +682,26 @@ var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 type fileHeaderServer struct{}
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	fileName,fullFilepath :=getFilePath(r.URL.Path)
+	reader,fileName,succeed :=openDataSource(r.URL.Path)
+	if !succeed {
+		log.Println("Error Reading from Data Source")
+		w.WriteHeader(400)
+		return 
+	}
 
 	var bluefileheader BlueHeader
 	var returnbytes []byte
 	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
 
-		log.Println("Opening File for file Header Mode " , fullFilepath)
-		file,err :=os.Open(fullFilepath)
-		if err !=nil {
-			log.Println("Error Opening File", err)
-			w.WriteHeader(400)
-			return 
-		}
-		binary.Read(file,binary.LittleEndian,&bluefileheader)
+		log.Println("Opening File for file Header Mode " , fileName)
+		// file,err :=os.Open(fullFilepath)
+		// if err !=nil {
+		// 	log.Println("Error Opening File", err)
+		// 	w.WriteHeader(400)
+		// 	return 
+		// }
+
+		binary.Read(reader,binary.LittleEndian,&bluefileheader)
 
 		var blueShort BlueHeaderShortenedFields
 		blueShort.Version = string(bluefileheader.Version[:])
@@ -744,7 +765,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		var marshalError error
 		returnbytes,marshalError =json.Marshal(blueShort)
-		if err !=nil {
+		if marshalError !=nil {
 			log.Println("Problem Marshalling Header to JSON ", marshalError)
 			w.WriteHeader(400)
 			return 
@@ -826,8 +847,6 @@ func main() {
 
 	// Launch a seperate routine to monitor the cache size
 	go checkCache(configuration.CacheLocation, configuration.CheckCacheEvery , configuration.CacheMaxBytes) 
-
-	log.Println("LocationsDetails Path: ", configuration.LocationDetails[0].Path)
 
 	// Serve up service on /sds
 	log.Println("Startup Server on Port: " , configuration.Port)

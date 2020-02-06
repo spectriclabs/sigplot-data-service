@@ -29,7 +29,7 @@ func getItemFromCache(cacheFileName string) ([]byte,bool) {
 		log.Println("Request not in Cache")
 		return outData, false
 	} 
-	log.Println("Found File in Cache. FileName and Size: " , cacheFileName)
+	log.Println("Found File in Cache. FileName: " , cacheFileName)
 	return outData, true
 }
 
