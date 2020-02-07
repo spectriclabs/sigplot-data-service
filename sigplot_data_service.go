@@ -507,18 +507,45 @@ func openDataSource(url string) (io.ReadSeeker,string,bool) {
 			reader:= io.ReadSeeker(file)
 			return reader,fileName,true
 		case "minio":
-			minioClient, err := minio.New(currentLocation.Location, currentLocation.MinioAccessKey, currentLocation.MinioSecretKey, false)
-			if err != nil {
-				log.Println("Error Establishing Connection to Minio" , err)
-				return nil,"",false
-			}
+			start := time.Now()
 			fullFilepath:=fmt.Sprintf("%s%s%s", currentLocation.Path,urlPath,fileName)
-			object, err := minioClient.GetObject(currentLocation.MinioBucket, fullFilepath, minio.GetObjectOptions{})
-			if err != nil {
-				log.Println("Error Getting object from Minio" , err)
-				return nil,"",false
+			cacheFileName:=fmt.Sprintf("%s%s%s",currentLocation.MinioBucket,fullFilepath,"x1y1x2y2outxsizeoutysize")
+			file, inCache:= getItemFromCache(cacheFileName,"miniocache/")
+			if !inCache {
+				log.Println("Minio File not in local file Cache, Need to fetch")
+				minioClient, err := minio.New(currentLocation.Location, currentLocation.MinioAccessKey, currentLocation.MinioSecretKey, false)
+				elapsed := time.Since(start)
+				log.Println(" Time to Make connection " , elapsed) 
+				if err != nil {
+					log.Println("Error Establishing Connection to Minio" , err)
+					return nil,"",false
+				}
+
+				start = time.Now()
+				object, err := minioClient.GetObject(currentLocation.MinioBucket, fullFilepath, minio.GetObjectOptions{})
+
+				fi, _ := object.Stat()
+				fileData:=make([]byte,fi.Size)
+				//var readerr error 
+				numRead,readerr :=object.Read(fileData)
+				if  int64(numRead) != fi.Size {
+					log.Println("Error Reading File from from Minio" , readerr, )
+					log.Println("Expected Bytes: " , fi.Size, "Got Bytes",numRead  )
+					return nil,"",false
+				}
+
+				putItemInCache(cacheFileName,"miniocache/",fileData)
+				cacheFileFullpath:=fmt.Sprintf("%s%s%s", configuration.CacheLocation,"miniocache/",cacheFileName)
+				file,err = os.Open(cacheFileFullpath)
+				if err!=nil {
+					log.Println("Error opening Minio Cache File,", err)
+					return nil,"",false
+				}
 			}
-			reader:= io.ReadSeeker(object)
+			reader:= io.ReadSeeker(file)
+			elapsed := time.Since(start)
+			log.Println(" Time to Get Minio File ", elapsed) 
+
 			return reader,fileName,true
 
 		default: 
@@ -533,49 +560,14 @@ type rdsServer struct{}
 
 func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	reader,fileName,succeed :=openDataSource(r.URL.Path)
-	if !succeed {
-		w.WriteHeader(400)
-		return 
-	}
-	cacheFileName := urlToCacheFileName(r.URL.Path,r.URL.RawQuery)
 	var data []byte
 	var inCache bool
 
 	var file_format string 
 	var file_type int 
 	var fileXSize int 
-	var filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size float64
+	var filexstart,filexdelta,fileystart,fileydelta,data_offset float64
 	var fileDataOffset int
-	if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
-		log.Println("Processing File as Blue File")
-		file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,file_data_size = processBlueFileHeader(reader)
-		fileDataOffset  = int(data_offset)
-		if file_type !=2000 {
-			log.Println("Only Supports type 2000 Bluefiles")
-			w.WriteHeader(400)
-			return 
-		}
-
-	} else if strings.Count(fileName,"_")==3 {
-		log.Println("Processing File as binary file with metadata in filename with underscores")
-		fileData := strings.Split(fileName, "_")
-		// Need to get these parameters from file metadata
-		file_format  = fileData[1]
-		fileDataOffset  = 0
-		var err error
-		fileXSize,err = strconv.Atoi(fileData[2])
-		if err != nil{
-			log.Println("Bad xfile size in filename")
-			fileXSize = 0
-			w.WriteHeader(400)
-			return 
-		}
-	} else {
-		log.Println("Invalid File Type")
-		w.WriteHeader(400)
-		return 
-	}
 
 	// Get Rest of URL Parameters
 	x1,ok :=getURLArgumentInt(r,"x1")
@@ -633,7 +625,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
  
 	}
 
-	log.Println("Reported file_data_size", file_data_size)
+	//log.Println("Reported file_data_size", file_data_size)
 
 
 	zminInt,zminSet := getURLArgumentInt(r,"zmin")
@@ -663,12 +655,52 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("params xstart, ystart, xsize, ysize, outxsize, outysize:", xstart, ystart, xsize, ysize, outxsize, outysize)
 
-	// Check if request has been previously processed and is in cache. If not process Request.
-	data,inCache = getItemFromCache(cacheFileName)
+
 	start := time.Now()
-	if !inCache {
+	cacheFileName := urlToCacheFileName(r.URL.Path,r.URL.RawQuery)
+	// Check if request has been previously processed and is in cache. If not process Request.
+	data,inCache = getDataFromCache(cacheFileName,"outputFiles/")
+
+	if !inCache { // If the output is not already in the cache then read the data file and do the processing. 
+
+		reader,fileName,succeed :=openDataSource(r.URL.Path)
+		if !succeed {
+			w.WriteHeader(400)
+			return 
+		}
+
+		if strings.Contains(fileName,".tmp") || strings.Contains(fileName,".prm") {
+			log.Println("Processing File as Blue File")
+			file_format,file_type,fileXSize,filexstart,filexdelta,fileystart,fileydelta,data_offset,_ = processBlueFileHeader(reader)
+			fileDataOffset  = int(data_offset)
+			if file_type !=2000 {
+				log.Println("Only Supports type 2000 Bluefiles")
+				w.WriteHeader(400)
+				return 
+			}
+
+		} else if strings.Count(fileName,"_")==3 {
+			log.Println("Processing File as binary file with metadata in filename with underscores")
+			fileData := strings.Split(fileName, "_")
+			// Need to get these parameters from file metadata
+			file_format  = fileData[1]
+			fileDataOffset  = 0
+			var err error
+			fileXSize,err = strconv.Atoi(fileData[2])
+			if err != nil{
+				log.Println("Bad xfile size in filename")
+				fileXSize = 0
+				w.WriteHeader(400)
+				return 
+			}
+		} else {
+			log.Println("Invalid File Type")
+			w.WriteHeader(400)
+			return 
+		}
+
 		data=processRequest(reader ,file_format,fileDataOffset,fileXSize,xstart,ystart,xsize,ysize,outxsize,outysize,transform,outputFmt,zmin,zmax,zset,colorMap) 
-		go putItemInCache(cacheFileName,data)
+		go putItemInCache(cacheFileName,"outputFiles/",data,)
 	}
 
 	elapsed := time.Since(start)
@@ -864,7 +896,10 @@ func main() {
 	}
 
 	// Launch a seperate routine to monitor the cache size
-	go checkCache(configuration.CacheLocation, configuration.CheckCacheEvery , configuration.CacheMaxBytes) 
+	outputPath:=fmt.Sprintf("%s%s", configuration.CacheLocation,"outputFiles/")
+	minioPath:=fmt.Sprintf("%s%s", configuration.CacheLocation,"miniocache/")
+	go checkCache(outputPath, configuration.CheckCacheEvery , configuration.CacheMaxBytes) 
+	go checkCache(minioPath, configuration.CheckCacheEvery , configuration.CacheMaxBytes)
 
 	// Serve up service on /sds
 	log.Println("Startup Server on Port: " , configuration.Port)

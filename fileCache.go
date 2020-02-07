@@ -7,6 +7,7 @@ import (
 	"strings"
 	"io/ioutil"
 	"time"
+	"io"
 )
 func urlToCacheFileName(url string,query string) string {
 
@@ -20,11 +21,11 @@ func urlToCacheFileName(url string,query string) string {
 	return response
 }
 
-func getItemFromCache(cacheFileName string) ([]byte,bool) {
+func getDataFromCache(cacheFileName string,subDir string) ([]byte,bool) {
 	var outData []byte
 
-	path:=fmt.Sprintf("%s%s", configuration.CacheLocation,cacheFileName)
-	outData, err := ioutil.ReadFile(path)
+	fullPath:=fmt.Sprintf("%s%s%s", configuration.CacheLocation,subDir,cacheFileName)
+	outData, err := ioutil.ReadFile(fullPath)
     if err != nil {
 		log.Println("Request not in Cache")
 		return outData, false
@@ -33,10 +34,25 @@ func getItemFromCache(cacheFileName string) ([]byte,bool) {
 	return outData, true
 }
 
-func putItemInCache(cacheFileName string, data []byte) {
+func getItemFromCache(cacheFileName string,subDir string) (io.ReadSeeker,bool) {
 
-	path:=fmt.Sprintf("%s%s", configuration.CacheLocation,cacheFileName)
-    file, err := os.Create(path)
+	fullPath:=fmt.Sprintf("%s%s%s", configuration.CacheLocation,subDir,cacheFileName)
+	file,err := os.Open(fullPath)
+	if err!=nil {
+		log.Println("Request not in Cache", err)
+		return nil,false
+	}
+	return file, true
+}
+
+func putItemInCache(cacheFileName string, subDir string, data []byte) {
+
+	fullPath:=fmt.Sprintf("%s%s%s", configuration.CacheLocation,subDir,cacheFileName)
+	fullPathDirectory:=fmt.Sprintf("%s%s", configuration.CacheLocation,subDir)
+	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
+		os.Mkdir(fullPathDirectory, 0700)
+	}
+    file, err := os.Create(fullPath)
     if err != nil {
         log.Println("Error creating Cache File" , err)
         return
@@ -59,7 +75,9 @@ func checkCache(cachePath string, every int, maxBytes int64) {
 
 			files, err := ioutil.ReadDir(cachePath)
 			if err != nil {
-				log.Fatal(err)
+				log.Println("checkCache Error: ",err)
+				time.Sleep(5*time.Second)
+				continue
 			}
 
 			var currentBytes int64 =0
