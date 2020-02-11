@@ -13,8 +13,9 @@ import (
 func urlToCacheFileName(url string, query string) string {
 
 	pathData := strings.Split(url, "/")
-	fileName := pathData[2]
-	response := fmt.Sprintf("%s_%s", fileName, query)
+	fileLocation := pathData[2]
+	fileName := pathData[len(pathData)-1]
+	response := fmt.Sprintf("%s_%s_%s", fileLocation,fileName, query)
 	response = strings.ReplaceAll(response, "&", "")
 	response = strings.ReplaceAll(response, "=", "")
 	response = strings.ReplaceAll(response, ".", "")

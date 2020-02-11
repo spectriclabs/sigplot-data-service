@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"math/bits"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -120,8 +121,14 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 
 			check(err)
+		
+		default:
+			log.Println("Unsupported output type")
 		}
 		//log.Println("out_data" , len(dataOut.Bytes()))
+
+		//TODO for SP: Add a case for P. Need to pack in 8 numbers back into 1 byte
+
 		return dataOut.Bytes()
 	}
 
@@ -147,12 +154,13 @@ func processBlueFileHeader(reader io.ReadSeeker) (string, int, int, float64, flo
 	return fileFormat, file_type, subsize, xstart, xdelta, ystart, ydelta, data_start, data_size
 }
 
-func convert_file_data(bytesin []byte, file_formatstring string) []float64 {
+func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 	var bytes_per_atom int = 1
 	//var atoms_in_file int= 1
 	//var num_slice=make([]int8,atoms_in_file)
 	var out_data []float64
 	switch string(file_formatstring[1]) {
+
 	case "B":
 		bytes_per_atom = 1
 		atoms_in_file := len(bytesin) / bytes_per_atom
@@ -193,6 +201,22 @@ func convert_file_data(bytesin []byte, file_formatstring string) []float64 {
 			num := *(*float64)(unsafe.Pointer(&bytesin[i*bytes_per_atom]))
 			out_data[i] = num
 		}
+	case "P":
+		//Case for Packed Data. Rad in as uint8, then create 8 floats from that. 
+		bytesInFile := len(bytesin) 
+		out_data = make([]float64, bytesInFile*8)
+		for i := 0; i < bytesInFile; i++ {
+			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
+			for j:=0; j<8;j++{
+				//Check if leading bit is a zero and add a float or 0 or 1
+				if bits.LeadingZeros8(num) > 0 {
+					out_data[i*8+j] = float64(0)
+				} else {
+					out_data[i*8+j] = float64(1)
+				}
+				num  = num<<1 // left shift to look at next bit
+			}
+		}
 
 	}
 	//log.Println("out_data" , len(out_data))
@@ -216,27 +240,30 @@ func doTransform(dataIn []float64, transform string) float64 {
 	return 0
 }
 
-func get_file_type_info(file_format string) (int, bool) {
+func getFileTypeInfo(fileFormat string) (float64, bool) {
 	//log.Println("file_format", file_format)
-	var complex_flag bool = false
-	var bytes_per_atom int = 1
-	if string(file_format[0]) == "C" {
-		complex_flag = true
+	var complexFlag bool = false
+	var bytesPerAtom float64 = 1
+	if string(fileFormat[0]) == "C" {
+		complexFlag = true
 	}
 	//log.Println("string(file_format[1])", string(file_format[1]))
-	switch string(file_format[1]) {
+	switch string(fileFormat[1]) {
 	case "B":
-		bytes_per_atom = 1
+		bytesPerAtom = 1
 	case "I":
-		bytes_per_atom = 2
+		bytesPerAtom = 2
 	case "L":
-		bytes_per_atom = 4
+		bytesPerAtom = 4
 	case "F":
-		bytes_per_atom = 4
+		bytesPerAtom = 4
 	case "D":
-		bytes_per_atom = 8
+		bytesPerAtom = 8
+	case "P":
+		bytesPerAtom = 0.125
 	}
-	return bytes_per_atom, complex_flag
+
+	return bytesPerAtom, complexFlag
 }
 
 func down_sample_line_inx(datain []float64, outxsize int, transform string, outData []float64, outLineNum int) {
@@ -328,62 +355,96 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 }
 
-func apply_cxmode(datain []float64, cxmode string) []float64 {
+func applyCXmode(datain []float64, cxmode string) []float64 {
 
 	//var lo_thresh float64=1.0e-20
 	out_data := make([]float64, len(datain)/2)
 	for i := 0; i < len(datain)-1; i += 2 {
-		out_data[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+		switch(cxmode) {
+		case "mag" : 
+			out_data[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+		case "phase":
+			out_data[i] = math.Atan2(datain[i+1],datain[i])
+		case "real":
+			out_data[i] = datain[i] 
+		case "imag":
+			out_data[i] = datain[i+1] 
+		case "10log":
+			out_data[i] =10*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+		case "20log:":
+			out_data[i] =20*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+
 		//TODO Add modes besides Magnitude
+		}
+
 	}
 	return out_data
 
 }
 
-func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, file_format string, file_data_offset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform string, zet bool) {
+func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform,cxmode string, zet bool) {
 
-	bytes_per_atom, complex_flag := get_file_type_info(file_format)
+	bytesPerAtom, complexFlag := getFileTypeInfo(fileFormat)
+
+
 	//log.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
-	bytes_per_element := bytes_per_atom
-	if complex_flag {
-		bytes_per_element = bytes_per_element * 2
+	bytesPerElement := bytesPerAtom
+	if complexFlag {
+		bytesPerElement = bytesPerElement * 2
 	}
-	bytes_length := xsize * bytes_per_element
+	
 
-	first_byte := file_data_offset + ((ystart*fileXSize + xstart) * bytes_per_element)
-	//log.Println("file Read info " ,ystart,xstart, first_byte ,bytes_length)
-	filedata, _ := getBytesFromReader(reader, first_byte, bytes_length)
+
+	firstDataByte := float64(ystart*fileXSize + xstart) * bytesPerElement
+	firstByteInt := int(math.Floor(firstDataByte))
+
+	bytesLength := float64(xsize) * bytesPerElement + (firstDataByte-float64(firstByteInt))
+	bytesLengthInt := int(math.Ceil(bytesLength))
+
+	//log.Println("file Read info " ,ystart,xstart, firstByte ,bytes_length)
+	filedata, _ := getBytesFromReader(reader, fileDataOffset+firstByteInt, bytesLengthInt)
 
 	//filedata := get_bytes_from_file(fileName ,first_byte ,bytes_length)
-	data_to_process := convert_file_data(filedata, file_format)
+	dataToProcess := convertFileData(filedata, fileFormat)
+
+	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
+	if bytesPerAtom<0 { 
+		dataStartBit := int(math.Mod(firstDataByte,1) *8)
+		dataEndBit := int(math.Mod(bytesLength,1) *8)
+		var extraBits int = 0
+		if dataEndBit > 0 {
+			extraBits=8-dataEndBit
+		}
+		dataToProcess=dataToProcess[dataStartBit:len(dataToProcess)-extraBits]
+	}
 
 	// Finding the max and min of data we processed to get a zmax and zmin if they are not set.
 	// Profiling suggests this is computationally intense.
 	if !zet {
-		localMax := floats.Max(data_to_process[:])
+		localMax := floats.Max(dataToProcess[:])
 		fileZMax = math.Max(fileZMax, localMax)
 
-		localMin := floats.Min(data_to_process[:])
+		localMin := floats.Min(dataToProcess[:])
 		fileZMin = math.Min(fileZMin, localMin)
 
 	}
 
-	var real_data []float64
-	if complex_flag {
-		real_data = apply_cxmode(data_to_process, "mag")
+	var realData []float64
+	if complexFlag {
+		realData = applyCXmode(dataToProcess, cxmode)
 	} else {
-		real_data = data_to_process
+		realData = dataToProcess
 	}
 	//log.Println("processline", (outxsize),len(real_data),xsize)
 	//out_data :=make([]float64,outxsize)
-	down_sample_line_inx(real_data, outxsize, transform, outData, outLineNum)
+	down_sample_line_inx(realData, outxsize, transform, outData, outLineNum)
 
 	//copy(outData[outLineNum*outxsize:],out_data)
 	//log.Println("processline Done", len(out_data))
 	done <- true
 }
 
-func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform string, outputFmt string, zmin, zmax float64, zset bool, colorMap string) []byte {
+func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform,cxmode string, outputFmt string, zmin, zmax float64, zset bool, colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize) / float64(outysize)
@@ -420,7 +481,7 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 		done := make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine := startLine; inputLine < endLine; inputLine++ {
-			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, zset)
+			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode,zset)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -441,7 +502,6 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 		zmin = fileZMin
 		zmax = fileZMax
 	}
-
 	outData := createOutput(processedData, outputFmt, zmin, zmax, colorMap)
 	return outData
 }
@@ -611,12 +671,13 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
-	outputFmt, ok := getURLArgumentString(r, "outfmt")
-	if !ok {
-		log.Println("Outformat Not Specified. Setting Equal to Input Format")
-		outputFmt = file_format
 
+	cxmode, ok := getURLArgumentString(r, "cxmode")
+	if !ok {
+		cxmode = "mag"
 	}
+
+
 
 	//log.Println("Reported file_data_size", file_data_size)
 
@@ -690,7 +751,14 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, outputFmt, zmin, zmax, zset, colorMap)
+		outputFmt, ok := getURLArgumentString(r, "outfmt")
+		if !ok {
+			log.Println("Outformat Not Specified. Setting Equal to Input Format")
+			outputFmt = file_format
+	
+		}
+
+		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode,outputFmt, zmin, zmax, zset, colorMap)
 		go putItemInCache(cacheFileName, "outputFiles/", data)
 	}
 
