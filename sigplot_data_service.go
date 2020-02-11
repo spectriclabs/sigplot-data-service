@@ -15,7 +15,7 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"runtime/pprof"
+//	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -719,7 +719,8 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+//var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+var configFile = flag.String("config", "./sdsConfig.json", "Location of Config File")
 
 type fileHeaderServer struct{}
 
@@ -852,25 +853,26 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
-	//Used to profile speed
-	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
 
+	flag.Parse()
+
+	
 	//Used to profile speed
+	//if *cpuprofile != "" {
+	//	f, err := os.Create(*cpuprofile)
+	//	if err != nil {
+	//		log.Fatal(err)
+	//	}
+	//	pprof.StartCPUProfile(f)
+	//	defer pprof.StopCPUProfile()
+	//}
 	//start := time.Now()
 	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
 	//elapsed := time.Since(start)
 	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
 
 	// Load Configuration File
-	err := gonfig.GetConf("./sdsConfig.json", &configuration)
+	err := gonfig.GetConf(*configFile, &configuration)
 	if err != nil {
 		log.Println("Error Reading Config File, ./sdsConfig.json :", err)
 		return
