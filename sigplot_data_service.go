@@ -24,8 +24,8 @@ import (
 	"unsafe"
 )
 
-var fileZMin float64
-var fileZMax float64
+var fileZMin float64 = 99999999
+var fileZMax float64 = -99999999
 var ioMutex = &sync.Mutex{}
 
 type Location struct {
@@ -51,26 +51,45 @@ type Configuration struct {
 var configuration Configuration
 
 func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64, colorMap string) []byte {
+	for i:=0; i<len(dataIn); i++ {
+		if math.IsNaN(dataIn[i]) {
+			log.Println("createOutput NaN" ,i )
+		}
+	}
+	
 	dataOut := new(bytes.Buffer)
 	var numColors int = 1000
 	//var dataOut []byte
 	if fileFormatString == "RGBA" {
 		controlColors := getColorConrolPoints(colorMap)
 		colorPalette := makeColorPalette(controlColors, numColors)
-		colorsPerSpan := (zmax - zmin) / float64(numColors)
-		for i := 0; i < len(dataIn); i++ {
-			colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)
-			colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
-			a := 255
-			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].red))
-			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].green))
-			dataOut.WriteByte(byte(colorPalette[int(colorIndex)].blue))
-			dataOut.WriteByte(byte(a))
+		if zmax!=zmin {
+			colorsPerSpan := (zmax - zmin) / float64(numColors)
+			for i := 0; i < len(dataIn); i++ {
+				// Check for dataIn[i] is NaN
+				colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)
+				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
+				a := 255
+
+				//log.Println("colorIndex", colorIndex,dataIn[i],zmin,zmax,colorsPerSpan)
+				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].red))
+				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].green))
+				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].blue))
+				dataOut.WriteByte(byte(a))
+			}
+		} else {
+			for i := 0; i < len(dataIn); i++ {
+				a := 255
+				dataOut.WriteByte(byte(colorPalette[0].red))
+				dataOut.WriteByte(byte(colorPalette[0].green))
+				dataOut.WriteByte(byte(colorPalette[0].blue))
+				dataOut.WriteByte(byte(a))
+			}
 		}
 		//log.Println("out_data RGBA" , len(dataOut.Bytes()))
 		return dataOut.Bytes()
 	} else {
-		//log.Println("Processing for Type ",fileFormatString)
+		log.Println("Processing for Type ",fileFormatString)
 		switch string(fileFormatString[1]) {
 		case "B":
 			var numSlice = make([]int8, len(dataIn))
@@ -227,15 +246,41 @@ func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 func doTransform(dataIn []float64, transform string) float64 {
 	switch transform {
 	case "mean":
-		return stat.Mean(dataIn[:], nil)
+		num := stat.Mean(dataIn[:], nil)
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0 
+		}
+		return num
 	case "max":
-		return floats.Max(dataIn[:])
+		num := floats.Max(dataIn[:])		
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0 
+		}
+		return num
 	case "min":
-		return floats.Min(dataIn[:])
+		num := floats.Min(dataIn[:])
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0 
+		}
+		return num
 	case "absmax":
-		return math.Abs(floats.Max(dataIn[:]))
+		//num := floats.Max(math.Abs(dataIn[:]))
+		num := dataIn[0] // TODO Fix 
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0 
+		}
+		return num
 	case "first":
-		return dataIn[0]
+		num := dataIn[0]
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0 
+		}
+		return num
 	}
 	return 0
 }
@@ -347,7 +392,7 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 	ioMutex.Unlock()
 
 	if numRead != numbytes || err != nil {
-		log.Println("Failed to Read Requested Bytes")
+		log.Println("Failed to Read Requested Bytes", err , numRead, numbytes)
 		return outData, false
 	}
 	//log.Println("Read Data Line" , len(out_data))
@@ -355,34 +400,62 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 }
 
-func applyCXmode(datain []float64, cxmode string) []float64 {
+func applyCXmode(datain []float64, cxmode string,complexData bool) []float64 {
 
-	//var lo_thresh float64=1.0e-20
-	out_data := make([]float64, len(datain)/2)
-	for i := 0; i < len(datain)-1; i += 2 {
-		switch(cxmode) {
-		case "mag" : 
-			out_data[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
-		case "phase":
-			out_data[i] = math.Atan2(datain[i+1],datain[i])
-		case "real":
-			out_data[i] = datain[i] 
-		case "imag":
-			out_data[i] = datain[i+1] 
-		case "10log":
-			out_data[i] =10*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
-		case "20log:":
-			out_data[i] =20*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+	if complexData {
 
-		//TODO Add modes besides Magnitude
+	
+		outData := make([]float64, len(datain)/2)
+		for i := 0; i < len(datain)-1; i += 2 {
+			switch(cxmode) {
+			case "Ma" : 
+				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+			case "Ph":
+				outData[i] = math.Atan2(datain[i+1],datain[i])
+			case "Re":
+				outData[i] = datain[i] 
+			case "Im":
+				outData[i] = datain[i+1] 
+			case "IR":
+				outData[i] =math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+			case "Lo":
+				outData[i] =10*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+			case "L2:":
+				outData[i] =20*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+
+
+			}
+
 		}
+		return outData
+	} else {
+		outData := make([]float64, len(datain))
+		for i := 0; i < len(datain); i++ {
+			switch(cxmode) {
+			case "Ma": 
+				outData[i] = math.Abs(datain[i])
+			case "Ph":
+				outData[i] = math.Atan2(0,datain[i])
+			case "Re":
+				outData[i] = datain[i] 
+			case "Im":
+				outData[i] = 0
+			case "IR":
+				outData[i] = datain[i] 
+			case "Lo":
+				outData[i] =10*math.Log10(math.Abs(datain[i]))
+			case "L2":
+				outData[i] =20*math.Log10(math.Abs(datain[i]))
 
+
+			}
+
+		}
+		return outData
 	}
-	return out_data
-
 }
 
-func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform,cxmode string, zet bool) {
+func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform,cxmode string, zSet,cxmodeSet bool) {
 
 	bytesPerAtom, complexFlag := getFileTypeInfo(fileFormat)
 
@@ -418,23 +491,31 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 		dataToProcess=dataToProcess[dataStartBit:len(dataToProcess)-extraBits]
 	}
 
+
+
+	var realData []float64
+	if complexFlag {
+		realData = applyCXmode(dataToProcess, cxmode,true)
+	} else {
+		if cxmodeSet {
+			realData = applyCXmode(dataToProcess, cxmode,false)
+		} else {
+			realData = dataToProcess
+		}
+		
+	}
+
 	// Finding the max and min of data we processed to get a zmax and zmin if they are not set.
 	// Profiling suggests this is computationally intense.
-	if !zet {
-		localMax := floats.Max(dataToProcess[:])
+	if !zSet {
+		localMax := floats.Max(realData[:])
 		fileZMax = math.Max(fileZMax, localMax)
 
-		localMin := floats.Min(dataToProcess[:])
+		localMin := floats.Min(realData[:])
 		fileZMin = math.Min(fileZMin, localMin)
 
 	}
 
-	var realData []float64
-	if complexFlag {
-		realData = applyCXmode(dataToProcess, cxmode)
-	} else {
-		realData = dataToProcess
-	}
 	//log.Println("processline", (outxsize),len(real_data),xsize)
 	//out_data :=make([]float64,outxsize)
 	down_sample_line_inx(realData, outxsize, transform, outData, outLineNum)
@@ -444,11 +525,14 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 	done <- true
 }
 
-func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform,cxmode string, outputFmt string, zmin, zmax float64, zset bool, colorMap string) []byte {
+func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform,cxmode string, outputFmt string, zmin, zmax float64, zset,cxmodeSet bool, colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize) / float64(outysize)
 	var yLinesPerOutputCeil int = int(math.Ceil(yLinesPerOutput))
+
+	fileZMin = 99999999
+	fileZMax = -99999999
 
 	// Loop over the output Y Lines
 	for outputLine := 0; outputLine < outysize; outputLine++ {
@@ -481,7 +565,7 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 		done := make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine := startLine; inputLine < endLine; inputLine++ {
-			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode,zset)
+			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode,zset,cxmodeSet)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -672,9 +756,11 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cxmodeSet :=true
 	cxmode, ok := getURLArgumentString(r, "cxmode")
 	if !ok {
 		cxmode = "mag"
+		cxmodeSet = false
 	}
 
 
@@ -758,7 +844,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	
 		}
 
-		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode,outputFmt, zmin, zmax, zset, colorMap)
+		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode,outputFmt, zmin, zmax, zset,cxmodeSet, colorMap)
 		go putItemInCache(cacheFileName, "outputFiles/", data)
 	}
 
@@ -773,11 +859,12 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Create a Return header with some metadata in it.
 	outxsizeStr := strconv.Itoa(outxsize)
 	outysizeStr := strconv.Itoa(outysize)
+
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("outxsize", outxsizeStr)
 	w.Header().Add("outysize", outysizeStr)
-	w.Header().Add("zmin", fmt.Sprintf("%.0f", zmin))
-	w.Header().Add("zmax", fmt.Sprintf("%.0f", zmax))
+	w.Header().Add("zmin", fmt.Sprintf("%f", zmin))
+	w.Header().Add("zmax", fmt.Sprintf("%f", zmax))
 	w.Header().Add("filexstart", fmt.Sprintf("%f", filexstart))
 	w.Header().Add("filexdelta", fmt.Sprintf("%f", filexdelta))
 	w.Header().Add("fileystart", fmt.Sprintf("%f", fileystart))
