@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -15,7 +15,7 @@ func urlToCacheFileName(url string, query string) string {
 	pathData := strings.Split(url, "/")
 	fileLocation := pathData[2]
 	fileName := pathData[len(pathData)-1]
-	response := fmt.Sprintf("%s_%s_%s", fileLocation,fileName, query)
+	response := fmt.Sprintf("%s_%s_%s", fileLocation, fileName, query)
 	response = strings.ReplaceAll(response, "&", "")
 	response = strings.ReplaceAll(response, "=", "")
 	response = strings.ReplaceAll(response, ".", "")
@@ -29,7 +29,7 @@ func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	outData, err := ioutil.ReadFile(fullPath)
 	if err != nil {
-		log.Println("Request not in Cache")
+		log.Error("Request not in Cache")
 		return outData, false
 	}
 	log.Println("Found File in Cache. FileName: ", cacheFileName)
@@ -52,32 +52,42 @@ func putItemInCache(cacheFileName string, subDir string, data []byte) {
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	fullPathDirectory := fmt.Sprintf("%s%s", configuration.CacheLocation, subDir)
 	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
-		os.Mkdir(fullPathDirectory, 0700)
+		mkdirErr := os.MkdirAll(fullPathDirectory, 0700)
+		if mkdirErr != nil {
+			log.Fatalf("Error making directory: %s: %s", fullPathDirectory, mkdirErr)
+		}
 	}
 	file, err := os.Create(fullPath)
 	if err != nil {
-		log.Println("Error creating Cache File", err)
+		log.Errorf("Error creating cache file: %s", err)
 		return
 	}
 	num, err := file.Write(data)
 	if err != nil || num != len(data) {
-		log.Println("Error creating Cache File", err)
+		log.Errorf("Error creating cache file: %s", err)
 		return
 	}
-	log.Println("Cached Data to File ", cacheFileName)
+	log.Printf("Cached Data to File %s", cacheFileName)
 }
 
 func checkCache(cachePath string, every int, maxBytes int64) {
+	// make `cachePath` directory if it doesn't exist
+	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+		log.Debugf("Making directory %s", cachePath)
+		mkdirErr := os.MkdirAll(cachePath, 0700)
+		if mkdirErr != nil {
+			log.Fatalf("Error making directory: %s: %s", cachePath, mkdirErr)
+		}
+	}
 
 	// duration expressed in nano seconds
-
 	nextRun := time.Now()
 	for {
 		if nextRun.Before(time.Now()) {
 
 			files, err := ioutil.ReadDir(cachePath)
 			if err != nil {
-				log.Println("checkCache Error: ", err)
+				log.Errorf("checkCache Error: %s", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -106,7 +116,7 @@ func checkCache(cachePath string, every int, maxBytes int64) {
 					log.Println("Cache over Maximum. Removing Old File", oldestFile.Name())
 					err = os.Remove(path)
 					if err != nil {
-						log.Println("Error remove cache file", err)
+						log.Errorf("Error removing cache file: %s", err)
 					}
 				} else {
 					log.Println("Almost Removed a file that was in the cache directory but doesn't appear to be in the format of sds. Don't put non-SDS files in the cache dir")
