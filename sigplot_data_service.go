@@ -590,6 +590,20 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 	return outData
 }
 
+func getURLArgumentFloat(r *http.Request, keyname string) (float64, bool) {
+	keys, ok := r.URL.Query()[keyname]
+
+	if !ok || len(keys[0]) < 1 {
+		return 0.0, false
+	}
+	retval, err :=strconv.ParseFloat(keys[0], 64)
+	if err != nil {
+		log.Println("Url Param ", keyname, "  is invalid")
+		return 0.0, false
+	}
+	return retval, true
+}
+
 func getURLArgumentInt(r *http.Request, keyname string) (int, bool) {
 	keys, ok := r.URL.Query()[keyname]
 
@@ -767,22 +781,16 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	//log.Println("Reported file_data_size", file_data_size)
 
-	zminInt, zminSet := getURLArgumentInt(r, "zmin")
-	var zmin float64
+	zmin, zminSet := getURLArgumentFloat(r, "zmin")
 	if !zminSet {
 		log.Println("Zmin Not Specified. Will estimate from file Selection")
 		zmin = 0
-	} else {
-		zmin = float64(zminInt)
 	}
 
-	zmaxInt, zmaxSet := getURLArgumentInt(r, "zmax")
-	var zmax float64
+	zmax, zmaxSet := getURLArgumentFloat(r, "zmax")
 	if !zmaxSet {
 		log.Println("Zmax Not Specified. Will estimate from file Selection")
 		zmax = 0
-	} else {
-		zmax = float64(zmaxInt)
 	}
 
 	zset := (zmaxSet && zminSet)
@@ -861,6 +869,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	outysizeStr := strconv.Itoa(outysize)
 
 	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers","*")
 	w.Header().Add("outxsize", outxsizeStr)
 	w.Header().Add("outysize", outysizeStr)
 	w.Header().Add("zmin", fmt.Sprintf("%f", zmin))
@@ -975,6 +984,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers","*")
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(returnbytes)
