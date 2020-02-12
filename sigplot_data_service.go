@@ -2,21 +2,21 @@ package main
 
 import (
 	"bytes"
-	"math/bits"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/minio/minio-go/v6"
+	log "github.com/sirupsen/logrus"
 	"github.com/tkanos/gonfig"
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
 	"io"
-	"log"
 	"math"
+	"math/bits"
 	"net/http"
 	"os"
-//	"runtime/pprof"
+	//	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,9 +121,9 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 
 			check(err)
-		
+
 		default:
-			log.Println("Unsupported output type")
+			log.Error("Unsupported output type")
 		}
 		//log.Println("out_data" , len(dataOut.Bytes()))
 
@@ -202,19 +202,19 @@ func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 			out_data[i] = num
 		}
 	case "P":
-		//Case for Packed Data. Rad in as uint8, then create 8 floats from that. 
-		bytesInFile := len(bytesin) 
+		//Case for Packed Data. Rad in as uint8, then create 8 floats from that.
+		bytesInFile := len(bytesin)
 		out_data = make([]float64, bytesInFile*8)
 		for i := 0; i < bytesInFile; i++ {
 			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
-			for j:=0; j<8;j++{
+			for j := 0; j < 8; j++ {
 				//Check if leading bit is a zero and add a float or 0 or 1
 				if bits.LeadingZeros8(num) > 0 {
 					out_data[i*8+j] = float64(0)
 				} else {
 					out_data[i*8+j] = float64(1)
 				}
-				num  = num<<1 // left shift to look at next bit
+				num = num << 1 // left shift to look at next bit
 			}
 		}
 
@@ -360,21 +360,21 @@ func applyCXmode(datain []float64, cxmode string) []float64 {
 	//var lo_thresh float64=1.0e-20
 	out_data := make([]float64, len(datain)/2)
 	for i := 0; i < len(datain)-1; i += 2 {
-		switch(cxmode) {
-		case "mag" : 
+		switch cxmode {
+		case "mag":
 			out_data[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 		case "phase":
-			out_data[i] = math.Atan2(datain[i+1],datain[i])
+			out_data[i] = math.Atan2(datain[i+1], datain[i])
 		case "real":
-			out_data[i] = datain[i] 
+			out_data[i] = datain[i]
 		case "imag":
-			out_data[i] = datain[i+1] 
+			out_data[i] = datain[i+1]
 		case "10log":
-			out_data[i] =10*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+			out_data[i] = 10 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
 		case "20log:":
-			out_data[i] =20*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+			out_data[i] = 20 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
 
-		//TODO Add modes besides Magnitude
+			//TODO Add modes besides Magnitude
 		}
 
 	}
@@ -382,23 +382,20 @@ func applyCXmode(datain []float64, cxmode string) []float64 {
 
 }
 
-func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform,cxmode string, zet bool) {
+func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform, cxmode string, zet bool) {
 
 	bytesPerAtom, complexFlag := getFileTypeInfo(fileFormat)
-
 
 	//log.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
 	bytesPerElement := bytesPerAtom
 	if complexFlag {
 		bytesPerElement = bytesPerElement * 2
 	}
-	
 
-
-	firstDataByte := float64(ystart*fileXSize + xstart) * bytesPerElement
+	firstDataByte := float64(ystart*fileXSize+xstart) * bytesPerElement
 	firstByteInt := int(math.Floor(firstDataByte))
 
-	bytesLength := float64(xsize) * bytesPerElement + (firstDataByte-float64(firstByteInt))
+	bytesLength := float64(xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
 	bytesLengthInt := int(math.Ceil(bytesLength))
 
 	//log.Println("file Read info " ,ystart,xstart, firstByte ,bytes_length)
@@ -408,14 +405,14 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 	dataToProcess := convertFileData(filedata, fileFormat)
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
-	if bytesPerAtom<0 { 
-		dataStartBit := int(math.Mod(firstDataByte,1) *8)
-		dataEndBit := int(math.Mod(bytesLength,1) *8)
+	if bytesPerAtom < 0 {
+		dataStartBit := int(math.Mod(firstDataByte, 1) * 8)
+		dataEndBit := int(math.Mod(bytesLength, 1) * 8)
 		var extraBits int = 0
 		if dataEndBit > 0 {
-			extraBits=8-dataEndBit
+			extraBits = 8 - dataEndBit
 		}
-		dataToProcess=dataToProcess[dataStartBit:len(dataToProcess)-extraBits]
+		dataToProcess = dataToProcess[dataStartBit : len(dataToProcess)-extraBits]
 	}
 
 	// Finding the max and min of data we processed to get a zmax and zmin if they are not set.
@@ -444,7 +441,7 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 	done <- true
 }
 
-func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform,cxmode string, outputFmt string, zmin, zmax float64, zset bool, colorMap string) []byte {
+func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform, cxmode string, outputFmt string, zmin, zmax float64, zset bool, colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize) / float64(outysize)
@@ -481,7 +478,7 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 		done := make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine := startLine; inputLine < endLine; inputLine++ {
-			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode,zset)
+			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode, zset)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -603,7 +600,7 @@ func openDataSource(url string) (io.ReadSeeker, string, bool) {
 		return reader, fileName, true
 
 	default:
-		log.Println("Unsupported Location Type")
+		log.Error("Unsupported Location Type")
 		return nil, "", false
 	}
 
@@ -676,8 +673,6 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		cxmode = "mag"
 	}
-
-
 
 	//log.Println("Reported file_data_size", file_data_size)
 
@@ -755,10 +750,10 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			log.Println("Outformat Not Specified. Setting Equal to Input Format")
 			outputFmt = file_format
-	
+
 		}
 
-		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode,outputFmt, zmin, zmax, zset, colorMap)
+		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode, outputFmt, zmin, zmax, zset, colorMap)
 		go putItemInCache(cacheFileName, "outputFiles/", data)
 	}
 
@@ -787,16 +782,13 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-//var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-var configFile = flag.String("config", "./sdsConfig.json", "Location of Config File")
-
 type fileHeaderServer struct{}
 
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reader, fileName, succeed := openDataSource(r.URL.Path)
 	if !succeed {
-		log.Println("Error Reading from Data Source")
+		log.Error("Error Reading from Data Source")
 		w.WriteHeader(400)
 		return
 	}
@@ -896,6 +888,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type routerServer struct{}
 
 func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Infof("%s", r.URL)
 	//Valid url is /sds/<filename>/rds or //Valid url is /sds/<filename>
 	rdsServer := &rdsServer{}
 	headerServer := &fileHeaderServer{}
@@ -919,42 +912,76 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func SetupLogging(debug bool) {
+	customFormatter := new(log.TextFormatter)
+	customFormatter.TimestampFormat = "2006-01-02T15:04:05.000"
+	customFormatter.FullTimestamp = true
+	log.SetFormatter(customFormatter)
+	log.SetLevel(log.DebugLevel)
+}
+
+//func RunProfile(cpuprofile string) (time.Duration, int) {
+//	f, err := os.Create(cpuprofile)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	pprof.StartCPUProfile(f)
+//	defer pprof.StopCPUProfile()
+//
+//	start := time.Now()
+//	data := processRequest(
+//		"mydata_SI_8192_20000",
+//		"SI",
+//		0,
+//		8192,
+//		0,
+//		0,
+//		8192,
+//		20000,
+//		300,
+//		700,
+//		"mean",
+//		"RGBA",
+//		-20000,
+//		8192,
+//		true,
+//		"RampColormap",
+//	)
+//	return time.Since(start), len(data)
+//}
+
 func main() {
-
-
+	// Setup CLI flags
+	// cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
+	configFile := flag.String("config", "./sdsConfig.json", "Location of Config File")
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
 
-	
-	//Used to profile speed
-	//if *cpuprofile != "" {
-	//	f, err := os.Create(*cpuprofile)
-	//	if err != nil {
-	//		log.Fatal(err)
+	// Used to profile speed
+	//	if *cpuprofile != "" {
+	//		elapsed, dataLen := RunProfile(*cpuprofile)
+	//		log.Printf(
+	//			"Length of Output Data %d processed in: %f",
+	//			dataLen,
+	//			elapsed,
+	//		)
+	//		return
 	//	}
-	//	pprof.StartCPUProfile(f)
-	//	defer pprof.StopCPUProfile()
-	//}
-	//start := time.Now()
-	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
-	//elapsed := time.Since(start)
-	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
+	SetupLogging(*debug)
 
 	// Load Configuration File
 	err := gonfig.GetConf(*configFile, &configuration)
 	if err != nil {
-		log.Println("Error Reading Config File, ./sdsConfig.json :", err)
-		return
+		log.Fatalf("Error reading config file %s: %s", *configFile, err)
 	}
 
 	if configuration.Logfile != "" {
 		// Open and setup log file
 		logFile, err := os.OpenFile(configuration.Logfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			log.Println("Error Reading logfile: ", configuration.Logfile, err)
-			return
+			log.Fatalf("Error Reading logfile: %s %s", configuration.Logfile, err)
 		}
 		log.SetOutput(logFile)
-		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
 
 	// Launch a seperate routine to monitor the cache size
@@ -964,7 +991,7 @@ func main() {
 	go checkCache(minioPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
 
 	// Serve up service on /sds
-	log.Println("Startup Server on Port: ", configuration.Port)
+	log.Printf("Listening on :%d...", configuration.Port)
 	s := &routerServer{}
 	http.Handle("/sds/", s)
 	msg := ":%d"
