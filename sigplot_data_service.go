@@ -2,21 +2,23 @@ package main
 
 import (
 	"bytes"
-	"math/bits"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"log"
+	"math"
+	"math/bits"
+	"net/http"
+	"os"
+
 	"github.com/minio/minio-go/v6"
 	"github.com/tkanos/gonfig"
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
-	"io"
-	"log"
-	"math"
-	"net/http"
-	"os"
-//	"runtime/pprof"
+
+	//	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,22 +50,33 @@ type Configuration struct {
 	LocationDetails []Location `json:"locationDetails"`
 }
 
+type fileMetaData struct {
+	Outxsize   int     `json:"outxsize"`
+	Outysize   int     `json:"outysize"`
+	Zmin       float64 `json:"zmin"`
+	Zmax       float64 `json:"zmax"`
+	Filexstart float64 `json:"filexstart"`
+	Filexdelta float64 `json:"filexdelta"`
+	Fileystart float64 `json:"fileystart"`
+	Fileydelta float64 `json:"fileydelta"`
+}
+
 var configuration Configuration
 
 func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64, colorMap string) []byte {
-	for i:=0; i<len(dataIn); i++ {
+	for i := 0; i < len(dataIn); i++ {
 		if math.IsNaN(dataIn[i]) {
-			log.Println("createOutput NaN" ,i )
+			log.Println("createOutput NaN", i)
 		}
 	}
-	
+
 	dataOut := new(bytes.Buffer)
 	var numColors int = 1000
 	//var dataOut []byte
 	if fileFormatString == "RGBA" {
 		controlColors := getColorConrolPoints(colorMap)
 		colorPalette := makeColorPalette(controlColors, numColors)
-		if zmax!=zmin {
+		if zmax != zmin {
 			colorsPerSpan := (zmax - zmin) / float64(numColors)
 			for i := 0; i < len(dataIn); i++ {
 				// Check for dataIn[i] is NaN
@@ -89,7 +102,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		//log.Println("out_data RGBA" , len(dataOut.Bytes()))
 		return dataOut.Bytes()
 	} else {
-		log.Println("Processing for Type ",fileFormatString)
+		log.Println("Processing for Type ", fileFormatString)
 		switch string(fileFormatString[1]) {
 		case "B":
 			var numSlice = make([]int8, len(dataIn))
@@ -140,7 +153,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 
 			check(err)
-		
+
 		default:
 			log.Println("Unsupported output type")
 		}
@@ -221,19 +234,19 @@ func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 			out_data[i] = num
 		}
 	case "P":
-		//Case for Packed Data. Rad in as uint8, then create 8 floats from that. 
-		bytesInFile := len(bytesin) 
+		//Case for Packed Data. Rad in as uint8, then create 8 floats from that.
+		bytesInFile := len(bytesin)
 		out_data = make([]float64, bytesInFile*8)
 		for i := 0; i < bytesInFile; i++ {
 			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
-			for j:=0; j<8;j++{
+			for j := 0; j < 8; j++ {
 				//Check if leading bit is a zero and add a float or 0 or 1
 				if bits.LeadingZeros8(num) > 0 {
 					out_data[i*8+j] = float64(0)
 				} else {
 					out_data[i*8+j] = float64(1)
 				}
-				num  = num<<1 // left shift to look at next bit
+				num = num << 1 // left shift to look at next bit
 			}
 		}
 
@@ -249,36 +262,36 @@ func doTransform(dataIn []float64, transform string) float64 {
 		num := stat.Mean(dataIn[:], nil)
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
-			num = 0 
+			num = 0
 		}
 		return num
 	case "max":
-		num := floats.Max(dataIn[:])		
+		num := floats.Max(dataIn[:])
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
-			num = 0 
+			num = 0
 		}
 		return num
 	case "min":
 		num := floats.Min(dataIn[:])
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
-			num = 0 
+			num = 0
 		}
 		return num
 	case "absmax":
 		//num := floats.Max(math.Abs(dataIn[:]))
-		num := dataIn[0] // TODO Fix 
+		num := dataIn[0] // TODO Fix
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
-			num = 0 
+			num = 0
 		}
 		return num
 	case "first":
 		num := dataIn[0]
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
-			num = 0 
+			num = 0
 		}
 		return num
 	}
@@ -392,7 +405,7 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 	ioMutex.Unlock()
 
 	if numRead != numbytes || err != nil {
-		log.Println("Failed to Read Requested Bytes", err , numRead, numbytes)
+		log.Println("Failed to Read Requested Bytes", err, numRead, numbytes)
 		return outData, false
 	}
 	//log.Println("Read Data Line" , len(out_data))
@@ -400,29 +413,27 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 }
 
-func applyCXmode(datain []float64, cxmode string,complexData bool) []float64 {
+func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 
 	if complexData {
 
-	
 		outData := make([]float64, len(datain)/2)
 		for i := 0; i < len(datain)-1; i += 2 {
-			switch(cxmode) {
-			case "Ma" : 
+			switch cxmode {
+			case "Ma":
 				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 			case "Ph":
-				outData[i] = math.Atan2(datain[i+1],datain[i])
+				outData[i] = math.Atan2(datain[i+1], datain[i])
 			case "Re":
-				outData[i] = datain[i] 
+				outData[i] = datain[i]
 			case "Im":
-				outData[i] = datain[i+1] 
+				outData[i] = datain[i+1]
 			case "IR":
-				outData[i] =math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 			case "Lo":
-				outData[i] =10*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+				outData[i] = 10 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
 			case "L2:":
-				outData[i] =20*math.Log10(datain[i]*datain[i] + datain[i+1]*datain[i+1])
-
+				outData[i] = 20 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
 
 			}
 
@@ -431,22 +442,21 @@ func applyCXmode(datain []float64, cxmode string,complexData bool) []float64 {
 	} else {
 		outData := make([]float64, len(datain))
 		for i := 0; i < len(datain); i++ {
-			switch(cxmode) {
-			case "Ma": 
+			switch cxmode {
+			case "Ma":
 				outData[i] = math.Abs(datain[i])
 			case "Ph":
-				outData[i] = math.Atan2(0,datain[i])
+				outData[i] = math.Atan2(0, datain[i])
 			case "Re":
-				outData[i] = datain[i] 
+				outData[i] = datain[i]
 			case "Im":
 				outData[i] = 0
 			case "IR":
-				outData[i] = datain[i] 
+				outData[i] = datain[i]
 			case "Lo":
-				outData[i] =10*math.Log10(math.Abs(datain[i]))
+				outData[i] = 10 * math.Log10(math.Abs(datain[i]))
 			case "L2":
-				outData[i] =20*math.Log10(math.Abs(datain[i]))
-
+				outData[i] = 20 * math.Log10(math.Abs(datain[i]))
 
 			}
 
@@ -455,23 +465,20 @@ func applyCXmode(datain []float64, cxmode string,complexData bool) []float64 {
 	}
 }
 
-func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform,cxmode string, zSet,cxmodeSet bool) {
+func processline(outData []float64, outLineNum int, done chan bool, reader io.ReadSeeker, fileFormat string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, outxsize int, transform, cxmode string, zSet, cxmodeSet bool) {
 
 	bytesPerAtom, complexFlag := getFileTypeInfo(fileFormat)
-
 
 	//log.Println("xsize,bytes_per_atom", xsize,bytes_per_atom)
 	bytesPerElement := bytesPerAtom
 	if complexFlag {
 		bytesPerElement = bytesPerElement * 2
 	}
-	
 
-
-	firstDataByte := float64(ystart*fileXSize + xstart) * bytesPerElement
+	firstDataByte := float64(ystart*fileXSize+xstart) * bytesPerElement
 	firstByteInt := int(math.Floor(firstDataByte))
 
-	bytesLength := float64(xsize) * bytesPerElement + (firstDataByte-float64(firstByteInt))
+	bytesLength := float64(xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
 	bytesLengthInt := int(math.Ceil(bytesLength))
 
 	//log.Println("file Read info " ,ystart,xstart, firstByte ,bytes_length)
@@ -481,28 +488,26 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 	dataToProcess := convertFileData(filedata, fileFormat)
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
-	if bytesPerAtom<0 { 
-		dataStartBit := int(math.Mod(firstDataByte,1) *8)
-		dataEndBit := int(math.Mod(bytesLength,1) *8)
+	if bytesPerAtom < 0 {
+		dataStartBit := int(math.Mod(firstDataByte, 1) * 8)
+		dataEndBit := int(math.Mod(bytesLength, 1) * 8)
 		var extraBits int = 0
 		if dataEndBit > 0 {
-			extraBits=8-dataEndBit
+			extraBits = 8 - dataEndBit
 		}
-		dataToProcess=dataToProcess[dataStartBit:len(dataToProcess)-extraBits]
+		dataToProcess = dataToProcess[dataStartBit : len(dataToProcess)-extraBits]
 	}
-
-
 
 	var realData []float64
 	if complexFlag {
-		realData = applyCXmode(dataToProcess, cxmode,true)
+		realData = applyCXmode(dataToProcess, cxmode, true)
 	} else {
 		if cxmodeSet {
-			realData = applyCXmode(dataToProcess, cxmode,false)
+			realData = applyCXmode(dataToProcess, cxmode, false)
 		} else {
 			realData = dataToProcess
 		}
-		
+
 	}
 
 	// Finding the max and min of data we processed to get a zmax and zmin if they are not set.
@@ -525,7 +530,7 @@ func processline(outData []float64, outLineNum int, done chan bool, reader io.Re
 	done <- true
 }
 
-func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform,cxmode string, outputFmt string, zmin, zmax float64, zset,cxmodeSet bool, colorMap string) []byte {
+func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int, fileXSize int, xstart int, ystart int, xsize int, ysize int, outxsize int, outysize int, transform, cxmode string, outputFmt string, zmin, zmax float64, zset, cxmodeSet bool, colorMap string) []byte {
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(ysize) / float64(outysize)
@@ -565,7 +570,7 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 		done := make(chan bool, 1)
 		// Launch the processing of each line concurrently and put the data into a set of channels
 		for inputLine := startLine; inputLine < endLine; inputLine++ {
-			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode,zset,cxmodeSet)
+			go processline(xThinData, inputLine-startLine, done, reader, file_format, fileDataOffset, fileXSize, xstart, inputLine, xsize, outxsize, transform, cxmode, zset, cxmodeSet)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -573,19 +578,38 @@ func processRequest(reader io.ReadSeeker, file_format string, fileDataOffset int
 			<-done
 		}
 
+		for i := 0; i < len(xThinData); i++ {
+			if math.IsNaN(xThinData[i]) {
+				log.Println("processedDataNaN", outputLine, i)
+			}
+		}
 		// Thin in y direction the subsset of lines that have now been processed in x
 		yThinData := downSampleLineInY(xThinData, outxsize, transform)
 		//log.Println("Thin Y data is currently ", len(yThinData))
 
+		for i := 0; i < len(yThinData); i++ {
+			if math.IsNaN(yThinData[i]) {
+				log.Println("processedDataNaN", outputLine, i)
+			}
+		}
+
 		processedData = append(processedData, yThinData...)
 		//log.Println("processedData is currently ", len(processedData))
 
-	}
+		for i := 0; i < len(processedData); i++ {
+			if math.IsNaN(processedData[i]) {
+				log.Println("processedDataNaN", outputLine, i)
+			}
+		}
 
+	}
+	log.Println("Process Request Zet ", zset)
 	if !zset {
 		zmin = fileZMin
 		zmax = fileZMax
+		log.Println("Getting Zmin, ZMax For File", zmin, zmax)
 	}
+	log.Println("Creating Output with Zmin, ZMax", zmin, zmax)
 	outData := createOutput(processedData, outputFmt, zmin, zmax, colorMap)
 	return outData
 }
@@ -596,7 +620,7 @@ func getURLArgumentFloat(r *http.Request, keyname string) (float64, bool) {
 	if !ok || len(keys[0]) < 1 {
 		return 0.0, false
 	}
-	retval, err :=strconv.ParseFloat(keys[0], 64)
+	retval, err := strconv.ParseFloat(keys[0], 64)
 	if err != nil {
 		log.Println("Url Param ", keyname, "  is invalid")
 		return 0.0, false
@@ -722,26 +746,26 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Get Rest of URL Parameters
 	x1, ok := getURLArgumentInt(r, "x1")
-	if !ok {
-		log.Println("X1 Missing. Required Field")
+	if !ok || x1 < 0 {
+		log.Println("X1 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
 	y1, ok := getURLArgumentInt(r, "y1")
-	if !ok {
-		log.Println("Y1 Missing. Required Field")
+	if !ok || y1 < 0 {
+		log.Println("Y1 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
 	x2, ok := getURLArgumentInt(r, "x2")
-	if !ok {
-		log.Println("X2 Missing. Required Field")
+	if !ok || x2 < 0 {
+		log.Println("X2 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
 	y2, ok := getURLArgumentInt(r, "y2")
-	if !ok {
-		log.Println("Y2 Missing. Required Field")
+	if !ok || y2 < 0 {
+		log.Println("Y2 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
@@ -750,16 +774,22 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	xsize := int(math.Abs(float64(x2) - float64(x1)))
 	ysize := int(math.Abs(float64(y2) - float64(y1)))
 
+	if xsize < 1 || ysize < 1 {
+		log.Println("Bad Xsize or ysize. xsize: ", xsize, " ysize: ", ysize)
+		w.WriteHeader(400)
+		return
+	}
+
 	outxsize, ok := getURLArgumentInt(r, "outxsize")
-	if !ok {
-		log.Println("outxsize Missing. Required Field")
+	if !ok || outxsize < 1 {
+		log.Println("outxsize Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
 
 	outysize, ok := getURLArgumentInt(r, "outysize")
-	if !ok {
-		log.Println("outysize Missing. Required Field")
+	if !ok || outysize < 1 {
+		log.Println("outysize Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
@@ -770,14 +800,12 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cxmodeSet :=true
+	cxmodeSet := true
 	cxmode, ok := getURLArgumentString(r, "cxmode")
 	if !ok {
 		cxmode = "mag"
 		cxmodeSet = false
 	}
-
-
 
 	//log.Println("Reported file_data_size", file_data_size)
 
@@ -849,35 +877,69 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			log.Println("Outformat Not Specified. Setting Equal to Input Format")
 			outputFmt = file_format
-	
+
 		}
 
-		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode,outputFmt, zmin, zmax, zset,cxmodeSet, colorMap)
+		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode, outputFmt, zmin, zmax, zset, cxmodeSet, colorMap)
 		go putItemInCache(cacheFileName, "outputFiles/", data)
+
+		var fileMData fileMetaData
+		fileMData.Outxsize = outxsize
+		fileMData.Outysize = outysize
+		fileMData.Filexstart = filexstart
+		fileMData.Filexdelta = filexdelta
+		fileMData.Fileystart = fileystart
+		fileMData.Fileydelta = fileydelta
+		if !zset {
+			fileMData.Zmin = fileZMin
+			fileMData.Zmax = fileZMax
+		} else {
+			fileMData.Zmin = zmin
+			fileMData.Zmax = zmax
+		}
+		//var marshalError error
+		fileMDataJSON, marshalError := json.Marshal(fileMData)
+		if marshalError != nil {
+			log.Println("Error Encoding metadata file to cache", marshalError)
+			w.WriteHeader(400)
+			return
+		}
+		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
+
 	}
 
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
 
-	if !zset {
-		zmin = fileZMin
-		zmax = fileZMax
+	// Get the metadata for this request to put into the return header.
+	fileMetaDataJSON, metaInCache := getDataFromCache(cacheFileName+"meta", "outputFiles/")
+	if !metaInCache {
+		log.Println("Error reading the metadata file from cache")
+		w.WriteHeader(400)
+		return
+	}
+	var fileMDataCache fileMetaData
+	marshalError := json.Unmarshal(fileMetaDataJSON, &fileMDataCache)
+	if marshalError != nil {
+		log.Println("Error Decoding metadata file from cache", marshalError)
+		w.WriteHeader(400)
+		return
 	}
 
 	// Create a Return header with some metadata in it.
-	outxsizeStr := strconv.Itoa(outxsize)
-	outysizeStr := strconv.Itoa(outysize)
+	outxsizeStr := strconv.Itoa(fileMDataCache.Outxsize)
+	outysizeStr := strconv.Itoa(fileMDataCache.Outysize)
 
 	w.Header().Add("Access-Control-Allow-Origin", "*")
-	w.Header().Add("Access-Control-Expose-Headers","*")
+	w.Header().Add("Access-Control-Expose-Headers", "*")
 	w.Header().Add("outxsize", outxsizeStr)
 	w.Header().Add("outysize", outysizeStr)
-	w.Header().Add("zmin", fmt.Sprintf("%f", zmin))
-	w.Header().Add("zmax", fmt.Sprintf("%f", zmax))
-	w.Header().Add("filexstart", fmt.Sprintf("%f", filexstart))
-	w.Header().Add("filexdelta", fmt.Sprintf("%f", filexdelta))
-	w.Header().Add("fileystart", fmt.Sprintf("%f", fileystart))
-	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileydelta))
+	w.Header().Add("zmin", fmt.Sprintf("%f", fileMDataCache.Zmin))
+	w.Header().Add("zmax", fmt.Sprintf("%f", fileMDataCache.Zmax))
+	w.Header().Add("filexstart", fmt.Sprintf("%f", fileMDataCache.Filexstart))
+	w.Header().Add("filexdelta", fmt.Sprintf("%f", fileMDataCache.Filexdelta))
+	w.Header().Add("fileystart", fmt.Sprintf("%f", fileMDataCache.Fileystart))
+	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileMDataCache.Fileydelta))
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(data)
@@ -984,7 +1046,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Add("Access-Control-Allow-Origin", "*")
-	w.Header().Add("Access-Control-Expose-Headers","*")
+	w.Header().Add("Access-Control-Expose-Headers", "*")
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(returnbytes)
@@ -1018,10 +1080,8 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 
-
 	flag.Parse()
 
-	
 	//Used to profile speed
 	//if *cpuprofile != "" {
 	//	f, err := os.Create(*cpuprofile)
@@ -1052,6 +1112,23 @@ func main() {
 		}
 		log.SetOutput(logFile)
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
+	}
+
+	//Create Directories for Cache if they don't exist
+	ok := createDirectory(configuration.CacheLocation)
+	if !ok {
+		log.Println("Error Creating Cache File Directory ", configuration.CacheLocation)
+		return
+	}
+	ok = createDirectory(configuration.CacheLocation + "outputFiles/")
+	if !ok {
+		log.Println("Error Creating Cache File/outputFiles Directory ", configuration.CacheLocation)
+		return
+	}
+	ok = createDirectory(configuration.CacheLocation + "miniocache/")
+	if !ok {
+		log.Println("Error Creating Cache File/miniocache Directory ", configuration.CacheLocation)
+		return
 	}
 
 	// Launch a seperate routine to monitor the cache size

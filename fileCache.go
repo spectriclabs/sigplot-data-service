@@ -10,12 +10,40 @@ import (
 	"time"
 )
 
+func createDirectory(path string) bool {
+
+	if string(path[len(path)-1]) != "/" {
+		path += "/"
+	}
+	pathData := strings.Split(path, "/")
+	pathUpOne := ""
+	if string(path[0]) == "/" {
+		pathUpOne += "/"
+	}
+	for i := 0; i < (len(pathData) - 2); i++ {
+		pathUpOne += pathData[i]
+		pathUpOne += "/"
+	}
+
+	if _, err := os.Stat(pathUpOne); os.IsNotExist(err) {
+		log.Println("Trying to Create ", path, " but ", pathUpOne, " does not exist")
+		return false
+	}
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		os.Mkdir(path, 0700)
+		log.Println("Created Directory ", path)
+		return true
+	}
+	return true
+
+}
+
 func urlToCacheFileName(url string, query string) string {
 
 	pathData := strings.Split(url, "/")
 	fileLocation := pathData[2]
 	fileName := pathData[len(pathData)-1]
-	response := fmt.Sprintf("%s_%s_%s", fileLocation,fileName, query)
+	response := fmt.Sprintf("%s_%s_%s", fileLocation, fileName, query)
 	response = strings.ReplaceAll(response, "&", "")
 	response = strings.ReplaceAll(response, "=", "")
 	response = strings.ReplaceAll(response, ".", "")
