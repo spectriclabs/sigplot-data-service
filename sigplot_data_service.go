@@ -836,7 +836,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	data, inCache = getDataFromCache(cacheFileName, "outputFiles/")
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
-
+		log.Println("RDS Request not in Cache, computing result")
 		reader, fileName, succeed := openDataSource(r.URL.Path)
 		if !succeed {
 			w.WriteHeader(400)

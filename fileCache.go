@@ -60,7 +60,6 @@ func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
 		log.Println("Request not in Cache")
 		return outData, false
 	}
-	log.Println("Found File in Cache. FileName: ", cacheFileName)
 	return outData, true
 }
 
@@ -92,7 +91,6 @@ func putItemInCache(cacheFileName string, subDir string, data []byte) {
 		log.Println("Error creating Cache File", err)
 		return
 	}
-	log.Println("Cached Data to File ", cacheFileName)
 }
 
 func checkCache(cachePath string, every int, maxBytes int64) {
