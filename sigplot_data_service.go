@@ -415,6 +415,7 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 
+	loThresh := 1.0e-20
 	if complexData {
 
 		outData := make([]float64, len(datain)/2)
@@ -431,9 +432,13 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 			case "IR":
 				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 			case "Lo":
-				outData[i] = 10 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
+				mag2 := datain[i]*datain[i] + datain[i+1]*datain[i+1]
+				mag2 = math.Max(mag2, loThresh)
+				outData[i] = 10 * math.Log10(mag2)
 			case "L2:":
-				outData[i] = 20 * math.Log10(datain[i]*datain[i]+datain[i+1]*datain[i+1])
+				mag2 := datain[i]*datain[i] + datain[i+1]*datain[i+1]
+				mag2 = math.Max(mag2, loThresh)
+				outData[i] = 20 * math.Log10(mag2)
 
 			}
 
@@ -454,9 +459,13 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 			case "IR":
 				outData[i] = datain[i]
 			case "Lo":
-				outData[i] = 10 * math.Log10(math.Abs(datain[i]))
+				mag2 := datain[i] * datain[i]
+				mag2 = math.Max(mag2, loThresh)
+				outData[i] = 10 * math.Log10(mag2)
 			case "L2":
-				outData[i] = 20 * math.Log10(math.Abs(datain[i]))
+				mag2 := datain[i] * datain[i]
+				mag2 = math.Max(mag2, loThresh)
+				outData[i] = 20 * math.Log10(mag2)
 
 			}
 
