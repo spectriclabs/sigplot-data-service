@@ -9,7 +9,6 @@ import (
 	"io"
 	"log"
 	"math"
-	"math/bits"
 	"net/http"
 	"os"
 
@@ -240,12 +239,7 @@ func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 		for i := 0; i < bytesInFile; i++ {
 			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
 			for j := 0; j < 8; j++ {
-				//Check if leading bit is a zero and add a float or 0 or 1
-				if bits.LeadingZeros8(num) > 0 {
-					out_data[i*8+j] = float64(0)
-				} else {
-					out_data[i*8+j] = float64(1)
-				}
+				out_data[i*8+j] = float64((num & 0x80) >> 7)
 				num = num << 1 // left shift to look at next bit
 			}
 		}
