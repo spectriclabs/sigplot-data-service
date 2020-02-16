@@ -1,0 +1,29 @@
+{
+    "cache_location": "./sdscache/",
+    "cache_max_bytes": 100000000,
+    "check_cache_every": 60,
+    "location_details": [
+        {
+            "location": "",
+            "location_name": "ServiceDir",
+            "location_type": "localFile",
+            "path": "./"
+        },
+        {
+            "location": "",
+            "location_name": "TestDir",
+            "location_type": "localFile",
+            "path": "./tests/data"
+        },
+        {
+            "location": "192.168.1.229:9000",
+            "location_name": "minio",
+            "location_type": "minio",
+            "minio_access_key": "minio",
+            "minio_bucket": "sdsdata",
+            "minio_secret_key": "miniostorage",
+            "path": ""
+        }
+    ],
+    "port": 5055
+}
