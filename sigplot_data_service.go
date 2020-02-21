@@ -439,32 +439,44 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		}
 		return outData
 	} else {
-		outData := make([]float64, len(datain))
-		for i := 0; i < len(datain); i++ {
-			switch cxmode {
-			case "Ma":
-				outData[i] = math.Abs(datain[i])
-			case "Ph":
+
+		switch cxmode {
+		case "Ma":
+			floats.Mul(datain, datain)
+			return datain
+		case "Ph":
+			outData := make([]float64, len(datain))
+			for i := 0; i < len(datain); i++ {
 				outData[i] = math.Atan2(0, datain[i])
-			case "Re":
-				outData[i] = datain[i]
-			case "Im":
-				outData[i] = 0
-			case "IR":
-				outData[i] = datain[i]
-			case "Lo":
+			}
+			return outData
+		case "Re":
+			return datain
+		case "Im":
+			outData := make([]float64, len(datain))
+			return outData
+		case "IR":
+			return datain
+		case "Lo":
+			outData := make([]float64, len(datain))
+			for i := 0; i < len(datain); i++ {
 				mag2 := datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 10 * math.Log10(mag2)
-			case "L2":
+			}
+			return outData
+		case "L2":
+			outData := make([]float64, len(datain))
+			for i := 0; i < len(datain); i++ {
 				mag2 := datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 20 * math.Log10(mag2)
-
 			}
+			return outData
 
 		}
-		return outData
+		return datain
+
 	}
 }
 
