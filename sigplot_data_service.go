@@ -815,6 +815,13 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	subsizeSet := true
+	subsize, ok := getURLArgumentInt(r, "subsize")
+	if !ok {
+		subsize = 0
+		subsizeSet = false
+	}
+
 	cxmodeSet := true
 	cxmode, ok := getURLArgumentString(r, "cxmode")
 	if !ok {
@@ -862,10 +869,14 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Println("Processing File as Blue File")
 			file_format, file_type, fileXSize, filexstart, filexdelta, fileystart, fileydelta, data_offset, _ = processBlueFileHeader(reader)
 			fileDataOffset = int(data_offset)
-			if file_type != 2000 {
-				log.Println("Only Supports type 2000 Bluefiles")
-				w.WriteHeader(400)
-				return
+			if subsizeSet {
+				fileXSize = subsize
+			} else {
+				if file_type == 1000 {
+					log.Println("For type 1000 files, a subsize needs to be set")
+					w.WriteHeader(400)
+					return
+				}
 			}
 
 		} else if strings.Count(fileName, "_") == 3 {
