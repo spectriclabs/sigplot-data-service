@@ -1009,6 +1009,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		blueShort.Ext_start = bluefileheader.Ext_start
 		blueShort.Data_start = bluefileheader.Data_start
 		blueShort.Data_size = bluefileheader.Data_size
+		blueShort.File_type = bluefileheader.File_type
 		blueShort.Format = string(bluefileheader.Format[:])
 		blueShort.Flagmask = bluefileheader.Flagmask
 		blueShort.Timecode = bluefileheader.Timecode
@@ -1054,8 +1055,14 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		blueShort.Spa = SPA[string(blueShort.Format[0])]
 		blueShort.Bps = BPS[string(blueShort.Format[1])]
 		blueShort.Bpa = float64(blueShort.Spa) * blueShort.Bps
-		blueShort.Ape = int(blueShort.Subsize)
+		if blueShort.File_type == 1000 {
+			blueShort.Ape = 1
+		} else {
+			blueShort.Ape = int(blueShort.Subsize)
+		}
+
 		blueShort.Bpe = float64(blueShort.Ape) * blueShort.Bpa
+		log.Println("Computing Size", blueShort.Data_size, blueShort.Bpa, blueShort.Ape)
 		blueShort.Size = int(blueShort.Data_size / (blueShort.Bpa * float64(blueShort.Ape)))
 
 		var marshalError error
