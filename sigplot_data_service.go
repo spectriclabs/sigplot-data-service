@@ -963,7 +963,8 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	outysizeStr := strconv.Itoa(fileMDataCache.Outysize)
 
 	w.Header().Add("Access-Control-Allow-Origin", "*")
-	w.Header().Add("Access-Control-Expose-Headers", "*")
+	//w.Header().Add("Access-Control-Expose-Headers", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "outxsize,outysize,zmin,zmax,filexstart,filexdelta,fileystart,fileydelta")
 	w.Header().Add("outxsize", outxsizeStr)
 	w.Header().Add("outysize", outysizeStr)
 	w.Header().Add("zmin", fmt.Sprintf("%f", fileMDataCache.Zmin))
@@ -1086,6 +1087,7 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Add("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Expose-Headers", "*")
+	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(returnbytes)
