@@ -899,6 +899,12 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if xsize > fileXSize {
+			log.Println("Invalid Request. Requested X size greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+
 		outputFmt, ok := getURLArgumentString(r, "outfmt")
 		if !ok {
 			log.Println("Outformat Not Specified. Setting Equal to Input Format")
