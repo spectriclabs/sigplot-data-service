@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"io/ioutil"
 
 	"github.com/minio/minio-go/v6"
 	"github.com/tkanos/gonfig"
@@ -409,32 +410,33 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 
+
 	loThresh := 1.0e-20
 	if complexData {
-
 		outData := make([]float64, len(datain)/2)
-		for i := 0; i < len(datain)-1; i += 2 {
+		for i := 0; i < len(datain)-2; i += 2 {
+			
 			switch cxmode {
 			case "Ma":
-				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+				outData[i/2] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 			case "Ph":
-				outData[i] = math.Atan2(datain[i+1], datain[i])
+				outData[i/2] = math.Atan2(datain[i+1], datain[i])
 			case "Re":
-				outData[i] = datain[i]
+				outData[i/2] = datain[i]
 			case "Im":
-				outData[i] = datain[i+1]
+				outData[i/2] = datain[i+1]
 			case "IR":
-				outData[i] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
+				outData[i/2] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
 			case "Lo":
 				mag2 := datain[i]*datain[i] + datain[i+1]*datain[i+1]
 				mag2 = math.Max(mag2, loThresh)
-				outData[i] = 10 * math.Log10(mag2)
-			case "L2:":
+				outData[i/2] = 10 * math.Log10(mag2)
+			case "L2":
 				mag2 := datain[i]*datain[i] + datain[i+1]*datain[i+1]
 				mag2 = math.Max(mag2, loThresh)
-				outData[i] = 20 * math.Log10(mag2)
-
+				outData[i/2] = 20 * math.Log10(mag2)
 			}
+
 
 		}
 		return outData
@@ -1093,29 +1095,101 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(returnbytes)
 }
 
-type routerServer struct{}
+type directoryListServer struct{}
 
-func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//Valid url is /sds/<filename>/rds or //Valid url is /sds/<filename>
-	rdsServer := &rdsServer{}
-	headerServer := &fileHeaderServer{}
+func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	mode, ok := getURLArgumentString(r, "mode")
-	if !ok {
-		log.Println("Mode Missing. Required Field")
+	log.Println("Processing Request to List Directory Contents")
+	pathData := strings.Split(r.URL.Path, "/")
+	locationName := pathData[2]
+	var urlPath string = ""
+	for i := 3; i < len(pathData)-1; i++ {
+		urlPath = urlPath + pathData[i] + "/"
+	}
+
+	fileName := pathData[len(pathData)-1]
+	if fileName !="" {
+		log.Println("Error: Expected Path to file locations" )
 		w.WriteHeader(400)
 		return
 	}
 
-	switch mode {
-	case "rds": //Valid url is /sds/path/to/file/<filename>?mode=rds
-		rdsServer.ServeHTTP(w, r)
-	case "hdr": //Valid url is /sds/path/to/file/<filename>?mode=hdr
-		headerServer.ServeHTTP(w, r)
-	default:
-		log.Println("Unknown Mode")
+	var currentLocation Location
+	for i := range configuration.LocationDetails {
+		if configuration.LocationDetails[i].LocationName == locationName {
+			currentLocation = configuration.LocationDetails[i]
+		}
+	}
+
+	if  currentLocation.LocationType != "localFile" {
+		log.Println("Error: Listing Files only support for localfile location Types" )
 		w.WriteHeader(400)
 		return
+	}
+
+	if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
+		currentLocation.Path += "/"
+	}
+	fullFilepath := fmt.Sprintf("%s%s", currentLocation.Path, urlPath)
+	log.Println("Looking in location:" ,fullFilepath)
+	files, err := ioutil.ReadDir(fullFilepath)
+	if err != nil {
+		log.Println("List Directory Error: ", err)
+		w.WriteHeader(400)
+		return
+	}
+	type fileList struct {
+		filenames   []string`json:"filenames"`
+	}
+	var filelist fileList
+	filenames := make([]string,len(files))
+	i:=0
+	for _, file := range files {
+		if !(file.IsDir()) {
+			filenames[i]=file.Name()
+			i++
+		}
+	}
+
+	filelist.filenames = filenames
+	returnbytes, marshalError := json.Marshal(filenames)
+	if marshalError != nil {
+		log.Println("Problem Marshalling Header to JSON ", marshalError)
+		w.WriteHeader(400)
+		return
+	}
+
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "*")
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	w.Write(returnbytes)
+}
+
+type routerServer struct{}
+
+func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	//Valid url is /sds/<filename>?mode=rds or //Valid url is /sds/<filename>?mode=hdr
+	rdsServer := &rdsServer{}
+	headerServer := &fileHeaderServer{}
+	directoryListServer :=&directoryListServer{}
+
+	mode, ok := getURLArgumentString(r, "mode")
+	if !ok {
+		directoryListServer.ServeHTTP(w, r) // if mode not present then try to process as list file in path
+	} else {
+
+		switch mode {
+		case "rds": //Valid url is /sds/path/to/file/<filename>?mode=rds
+			rdsServer.ServeHTTP(w, r)
+		case "hdr": //Valid url is /sds/path/to/file/<filename>?mode=hdr
+			headerServer.ServeHTTP(w, r)
+		default:
+			log.Println("Unknown Mode")
+			w.WriteHeader(400)
+			return
+		}
 	}
 }
 

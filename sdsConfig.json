@@ -23,6 +23,15 @@
 	                        "minioSecretKey":   ""
                         },
                         {
+                            "locationName":     "sdsdata",
+                            "locationType":     "localFile",
+	                        "path":             "/data/sdsdata/",
+	                        "minioBucket":      "",
+	                        "location":         "",
+	                        "minioAccessKey":   "",
+	                        "minioSecretKey":   ""
+                        },
+                        {
                             "locationName":     "minio",
                             "locationType":     "minio",
 	                        "path":             "",
