@@ -1,7 +1,6 @@
 {
     "port": 5055,
-	"cacheLocation": "./sdscache/",
-    "logfile": "./logs/sds.log",
+    "cacheLocation": "./sdscache/",
     "cacheMaxBytes": 100000000,
     "checkCacheEvery":60,
     "locationDetails": [{
