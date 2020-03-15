@@ -1095,6 +1095,27 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write(returnbytes)
 }
 
+type rawServer struct{}
+
+func (s *rawServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    reader, fileName, succeed := openDataSource(r.URL.Path)
+    if !succeed {
+	    log.Println("Error Reading from Data Source")
+	    w.WriteHeader(400)
+	    return
+    }
+
+    if strings.Contains(fileName, ".tmp") || strings.Contains(fileName, ".prm") {
+        w.Header().Add("Content-Type", "application/bluefile")
+    } else {
+        w.Header().Add("Content-Type", "application/binary")
+    }
+    w.Header().Add("Access-Control-Allow-Origin", "*")
+    w.Header().Add("Access-Control-Expose-Headers", "*")
+
+    http.ServeContent(w, r, fileName, time.Now(), reader)
+}
+
 type directoryListServer struct{}
 
 func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1173,6 +1194,7 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//Valid url is /sds/<filename>?mode=rds or //Valid url is /sds/<filename>?mode=hdr
 	rdsServer := &rdsServer{}
 	headerServer := &fileHeaderServer{}
+	rawServer := &rawServer{}
 	directoryListServer :=&directoryListServer{}
 
 	mode, ok := getURLArgumentString(r, "mode")
@@ -1185,6 +1207,8 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rdsServer.ServeHTTP(w, r)
 		case "hdr": //Valid url is /sds/path/to/file/<filename>?mode=hdr
 			headerServer.ServeHTTP(w, r)
+		case "raw": //Valid url is /sds/path/to/file/<filename>?mode=hdr
+			rawServer.ServeHTTP(w, r)
 		default:
 			log.Println("Unknown Mode")
 			w.WriteHeader(400)
@@ -1258,5 +1282,12 @@ func main() {
 	http.Handle("/sds/", s)
 	msg := ":%d"
 	result := fmt.Sprintf(msg, configuration.Port)
-	log.Fatal(http.ListenAndServe(result, nil))
+
+	svr := &http.Server{
+		Addr: result,
+		ReadTimeout: 240 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+	log.Fatal(svr.ListenAndServe())
 }
