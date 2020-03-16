@@ -17,6 +17,7 @@ import (
 	"github.com/tkanos/gonfig"
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
+	assetfs "github.com/elazarl/go-bindata-assetfs"
 
 	//	"runtime/pprof"
 	"strconv"
@@ -29,6 +30,8 @@ import (
 var fileZMin float64 = 99999999
 var fileZMax float64 = -99999999
 var ioMutex = &sync.Mutex{}
+var uiEnabled = true // set to false by stub_asset if the ui build isn't included
+var stubHTML = "" // set to HTML by stub_asset if the ui build isn't included
 
 type Location struct {
 	LocationName   string `json:"locationName"`
@@ -1116,6 +1119,35 @@ func (s *rawServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
     http.ServeContent(w, r, fileName, time.Now(), reader)
 }
 
+func handleUI(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// TODO add any header things we want
+		// header := w.Header()
+		// header.Add(...)
+		h.ServeHTTP(w, req)
+		return
+	})
+}
+
+type UIAssetWrapper struct {
+	FileSystem *assetfs.AssetFS
+}
+
+func (fs *UIAssetWrapper) Open(name string) (http.File, error) {
+	log.Println("Opening " + name)
+	if file, err := fs.FileSystem.Open(name); err == nil {
+		log.Println("found " + name)
+		return file, nil
+	} else {
+		log.Println("Not found " + name)
+		// serve index.html instead of 404ing
+		if err == os.ErrNotExist {
+			return fs.FileSystem.Open("index.html")
+		}
+		return nil, err
+	}
+}
+
 type directoryListServer struct{}
 
 func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1277,14 +1309,25 @@ func main() {
 	go checkCache(minioPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
 
 	// Serve up service on /sds
+	log.Println("UI Enabled: ", uiEnabled)
 	log.Println("Startup Server on Port: ", configuration.Port)
-	s := &routerServer{}
-	http.Handle("/sds/", s)
+
+	sdsServer := &routerServer{}
+	http.Handle("/sds/", sdsServer)
+
+	if uiEnabled {
+		http.Handle("/ui/", http.StripPrefix("/ui/", handleUI(http.FileServer(&UIAssetWrapper{FileSystem: assetFS()}))))
+	} else {
+		http.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(stubHTML))
+		})
+	}
+
 	msg := ":%d"
-	result := fmt.Sprintf(msg, configuration.Port)
+	bindAddr := fmt.Sprintf(msg, configuration.Port)
 
 	svr := &http.Server{
-		Addr: result,
+		Addr: bindAddr,
 		ReadTimeout: 240 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		MaxHeaderBytes: 1 << 20,

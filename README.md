@@ -43,3 +43,23 @@ Currently the web service has one end point /sds that takes the following parame
 ## Juypter testing
 
 The sds.ipynb jupyter notebook can be used to interact with the SDS and plot the 2D files and the sub selections that come back to SDS. It is assumed that Juypter can find the same data files in the same relative path as the server side application. This is only needed to test and compare the files before and after the sub selections. 
+
+## UI Development Mode
+
+```
+cd ui
+nvm use # assumes you have run nvm install at least once
+SDS_URL="http://localhost:5055/sds" ROOT_URL="/ui/" ember serve
+```
+
+Now you can visit http://localhost:4200/ui/demo.
+
+## Docker
+
+The Docker version currently *MUST* be run behind an NGINX proxy rooted at /sigplot/
+
+```
+make docker
+
+docker run -it --rm -p 5055:5055 sds:0.1
+```

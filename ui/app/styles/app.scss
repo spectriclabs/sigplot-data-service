@@ -1,0 +1,16 @@
+
+@import "ember-bootstrap/bootstrap";
+
+.scrollable {
+    margin-bottom: 10px;
+    overflow: scroll;
+    -webkit-overflow-scrolling: touch;
+}
+
+.fill {
+    min-height: 100%;
+}
+
+html,body {
+    height: 100%;
+}
