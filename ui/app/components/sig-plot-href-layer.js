@@ -29,7 +29,7 @@ export default class SigPlotHrefLayerComponent extends Component {
 
         // deoverlay first
         if (this.lyrN !== null) {
-            this._plot.deoverlay(this.lyrN);
+            this._plot.plot.deoverlay(this.lyrN);
             this.lyrN = null;
         }
 
@@ -44,7 +44,7 @@ export default class SigPlotHrefLayerComponent extends Component {
             options.layerType = this.args.layerType;
         }
         if (this.args.href) {
-            this.lynN = this._plot.plot.overlay_href(this.args.href, null, options);
+            this.lynN = this._plot.plot.overlay_href(this.args.href, (hcb, lyrN) => { this.lyrN = lyrN }, options);
         }
     }
 
