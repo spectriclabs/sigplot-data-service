@@ -276,9 +276,12 @@ func doTransform(dataIn []float64, transform string) float64 {
 			num = 0
 		}
 		return num
-	case "absmax":
-		//num := floats.Max(math.Abs(dataIn[:]))
-		num := dataIn[0] // TODO Fix
+	case "maxabs":
+		absnums := make([]float64,len(dataIn))
+		for i:=0; i<len(dataIn); i++ {
+			absnums[i] = math.Abs(dataIn[i])
+		}
+		num := floats.Max(absnums[:])
 		if math.IsNaN(num) {
 			log.Println("DoTransform produced NaN")
 			num = 0
