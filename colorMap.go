@@ -2,7 +2,6 @@ package main
 
 import (
 	"math"
-	//	"fmt"
 )
 
 type colorPoint struct {
@@ -24,11 +23,10 @@ func makeColorPalette(controlColors []colorPoint, numColors int) []colorPoint {
 		redDiff := (float64(controlColors[i].red) - float64(lastPoint.red)) * 255.0 / 100
 		greenDiff := (float64(controlColors[i].green) - float64(lastPoint.green)) * 255.0 / 100
 		blueDiff := (float64(controlColors[i].blue) - float64(lastPoint.blue)) * 255.0 / 100
-		//fmt.Println("colorPalette 0 " , redDiff,greenDiff,blueDiff)
 		startRange := lastIndexFilled + 1
 		endRange := int(math.Round(float64(controlColors[i].position) * float64(colorsPerPosition)))
 		for j := startRange; j < endRange; j++ {
-			percentRange := (float64(j) - float64(startRange)) / float64((endRange - startRange))
+			percentRange := (float64(j) - float64(startRange)) / float64((endRange - startRange-1))
 			outColors[j].red = uint8(math.Round(percentRange*redDiff + float64(lastPoint.red)*255.0/100))
 			outColors[j].green = uint8(math.Round(percentRange*greenDiff + float64(lastPoint.green)*255.0/100))
 			outColors[j].blue = uint8(math.Round(percentRange*blueDiff + float64(lastPoint.blue)*255.0/100))

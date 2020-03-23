@@ -86,7 +86,6 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 				colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)
 				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
 				a := 255
-
 				//log.Println("colorIndex", colorIndex,dataIn[i],zmin,zmax,colorsPerSpan)
 				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].red))
 				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].green))
@@ -860,7 +859,11 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	cacheFileName := urlToCacheFileName(r.URL.Path, r.URL.RawQuery)
 	// Check if request has been previously processed and is in cache. If not process Request.
-	data, inCache = getDataFromCache(cacheFileName, "outputFiles/")
+	if *useCache {
+		data, inCache = getDataFromCache(cacheFileName, "outputFiles/")
+	} else {
+		inCache = false
+	}
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
@@ -918,7 +921,9 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		data = processRequest(reader, file_format, fileDataOffset, fileXSize, xstart, ystart, xsize, ysize, outxsize, outysize, transform, cxmode, outputFmt, zmin, zmax, zset, cxmodeSet, colorMap)
-		go putItemInCache(cacheFileName, "outputFiles/", data)
+		if *useCache {
+			go putItemInCache(cacheFileName, "outputFiles/", data)
+		}
 
 		var fileMData fileMetaData
 		fileMData.Outxsize = outxsize
@@ -985,6 +990,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 //var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var configFile = flag.String("config", "./sdsConfig.json", "Location of Config File")
+var useCache = flag.Bool("usecache", true, "Use SDS Cache. Can be disabled for certain cases like testing." )
 
 type fileHeaderServer struct{}
 
@@ -1249,23 +1255,9 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func main() {
+func setupConfigLogCache() {
 
 	flag.Parse()
-
-	//Used to profile speed
-	//if *cpuprofile != "" {
-	//	f, err := os.Create(*cpuprofile)
-	//	if err != nil {
-	//		log.Fatal(err)
-	//	}
-	//	pprof.StartCPUProfile(f)
-	//	defer pprof.StopCPUProfile()
-	//}
-	//start := time.Now()
-	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
-	//elapsed := time.Since(start)
-	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
 
 	// Load Configuration File
 	err := gonfig.GetConf(*configFile, &configuration)
@@ -1307,6 +1299,30 @@ func main() {
 	minioPath := fmt.Sprintf("%s%s", configuration.CacheLocation, "miniocache/")
 	go checkCache(outputPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
 	go checkCache(minioPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
+}
+
+func main() {
+
+
+
+	//Used to profile speed
+	//if *cpuprofile != "" {
+	//	f, err := os.Create(*cpuprofile)
+	//	if err != nil {
+	//		log.Fatal(err)
+	//	}
+	//	pprof.StartCPUProfile(f)
+	//	defer pprof.StopCPUProfile()
+	//}
+	//start := time.Now()
+	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
+	//elapsed := time.Since(start)
+	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
+
+	
+	setupConfigLogCache()
+
+
 
 	// Serve up service on /sds
 	log.Println("UI Enabled: ", uiEnabled)
