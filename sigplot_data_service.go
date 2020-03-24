@@ -419,7 +419,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 	loThresh := 1.0e-20
 	if complexData {
 		outData := make([]float64, len(datain)/2)
-		for i := 0; i < len(datain)-2; i += 2 {
+		for i := 0; i < len(datain)-1; i += 2 {
 			
 			switch cxmode {
 			case "Ma":
