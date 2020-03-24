@@ -17,11 +17,12 @@ import (
 // For lines between 101-500 it changes based on x value with 10 equal sized portions. Each section of 60 columns increases by 1 starting from 0 and going to 9.
 // For example, lines 0-59, are 0, 60-119 are 1 ... 540-599 are 9. 
 
-func TestDirectoryHandler(t *testing.T) {
+
+func DirectoryHandler(t *testing.T,locationName string) []byte{
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
     // Create a request to pass to our handler. 
-	location_name := "TestDir/"
-	sdsurl := "/sds/" + location_name 
+	
+	sdsurl := "/sds/" + locationName 
 	//t.Log("url", sdsurl)
 	req, err := http.NewRequest("GET", sdsurl, nil)
     if err != nil {
@@ -38,7 +39,34 @@ func TestDirectoryHandler(t *testing.T) {
 	if (rr.Code != http.StatusOK) {
 		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
 	}
+	return rr.Body.Bytes()
+}
+func TestDirectoryHandler(t *testing.T) {
+	locationName := "TestDir/"
+	_ = DirectoryHandler(t,locationName)
+}
 
+func TestFileHandler(t *testing.T) {
+	locationName := "TestDir/mydata_SB_60_60.tmp"
+	returnData := DirectoryHandler(t,locationName)
+	if len(returnData) !=(60*60)+512 {
+		t.Errorf("File URL Mode failed. Expecting %v bytes got %v", (60*60)+512, len(returnData))
+	}
+}
+
+func TestLocationListHandler(t *testing.T) {
+	locationName := ""
+	returnData := DirectoryHandler(t,locationName)
+	var locationDetails []Location
+	marshalError := json.Unmarshal(returnData, &locationDetails)
+	if marshalError != nil {
+		t.Errorf("Error with Rturn Data")
+	}
+	for i:=0;i<len(configuration.LocationDetails);i++ {
+		if configuration.LocationDetails[i] != locationDetails[i] {
+			t.Errorf("Location Details Don't match Configuration.")
+		}
+	}
 }
 
 func HDRHandler(t *testing.T,locationName string) {
@@ -57,7 +85,7 @@ func HDRHandler(t *testing.T,locationName string) {
 
 	rr := httptest.NewRecorder()
 	//handler := http.HandlerFunc(fileHeaderServer)
-	headerServer := &fileHeaderServer{}
+	headerServer := &routerServer{}
 	headerServer.ServeHTTP(rr,req)
 
 	if (rr.Code != http.StatusOK) {
@@ -83,6 +111,39 @@ func TestHDRHandlerTestDir(t *testing.T) {
 	HDRHandler(t,"TestDir/")
 }
 
+func RAWHandler(t *testing.T,locationName string) {
+	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+    // Create a request to pass to our handler. 
+	filename := "mydata_SB_60_60.tmp"
+	sdsurl := "/sds/" + locationName + filename +"?mode=raw"
+	//t.Log("url", sdsurl)
+	req, err := http.NewRequest("GET", sdsurl, nil)
+	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
+    if err != nil {
+        t.Fatal(err)
+	}
+
+	setupConfigLogCache()
+
+	rr := httptest.NewRecorder()
+	//handler := http.HandlerFunc(fileHeaderServer)
+	headerServer := &routerServer{}
+	headerServer.ServeHTTP(rr,req)
+
+	if (rr.Code != http.StatusOK) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	}
+
+	if len(rr.Body.Bytes()) !=(60*60)+512 {
+		t.Errorf("Raw Mode failed. Expecting %v bytes got %v", (60*60)+512, len(rr.Body.Bytes()))
+	}
+}
+
+func TestRAWHandlerTestDir(t *testing.T) {
+
+	RAWHandler(t,"TestDir/")
+}
+
 func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,outysize int, transform, cxmode, colormap , zmin,zmax string, expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	location_name := "TestDir/"
@@ -99,7 +160,7 @@ func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,
 
 	rr := httptest.NewRecorder()
 	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &rdsServer{}
+	rdsServer := &routerServer{}
 	rdsServer.ServeHTTP(rr,req)
 
 	if (rr.Code != http.StatusOK) {
@@ -130,7 +191,7 @@ func BaseicRDSHandler(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysiz
 
 	rr := httptest.NewRecorder()
 	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &rdsServer{}
+	rdsServer := &routerServer{}
 	rdsServer.ServeHTTP(rr,req)
 
 	if (rr.Code != http.StatusOK) {
@@ -329,4 +390,19 @@ func TestFullCFSameSizeMeanReal(t *testing.T) {
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
 	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Im",byteData.Bytes())
+}
+
+func TestFirstPointSP(t *testing.T) {
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = 0 //SP file has the bits 0,0,1,1, as the first four
+	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",0,0,1,1,1,1,"first","Re", expectedReturn)
+}
+
+func TestFourPointsSP(t *testing.T) {
+	expectedReturn := make([]byte,4)
+	expectedReturn[0] = 0 //SP file has the bits 0,0,1,1, as the first four
+	expectedReturn[1] = 0
+	expectedReturn[2] = 1
+	expectedReturn[3] = 1
+	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",1,0,4,1,4,1,"first","Re", expectedReturn)
 }

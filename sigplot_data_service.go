@@ -1157,6 +1157,25 @@ func (fs *UIAssetWrapper) Open(name string) (http.File, error) {
 	}
 }
 
+type locationListServer struct{}
+
+func (s *locationListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("Processing Request as locationListServer")
+	locationDetailsJSONBytes, marshalError := json.Marshal(configuration.LocationDetails)
+	if marshalError != nil {
+		log.Println("Error Encoding LocationDetails ", marshalError)
+		w.WriteHeader(400)
+		return
+	}
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "*")
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	w.Write(locationDetailsJSONBytes)
+
+}
+
 type directoryListServer struct{}
 
 func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -1165,15 +1184,12 @@ func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	pathData := strings.Split(r.URL.Path, "/")
 	locationName := pathData[2]
 	var urlPath string = ""
-	for i := 3; i < len(pathData)-1; i++ {
+	for i := 3; i < len(pathData); i++ {
 		urlPath = urlPath + pathData[i] + "/"
 	}
 
-	fileName := pathData[len(pathData)-1]
-	if fileName !="" {
-		log.Println("Error: Expected Path to file locations" )
-		w.WriteHeader(400)
-		return
+	if string(r.URL.Path[len(r.URL.Path)-1]) != "/" {
+		urlPath = strings.TrimSuffix(urlPath, "/")
 	}
 
 	var currentLocation Location
@@ -1194,6 +1210,21 @@ func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	fullFilepath := fmt.Sprintf("%s%s", currentLocation.Path, urlPath)
 	log.Println("Looking in location:" ,fullFilepath)
+	fi, err := os.Stat(fullFilepath)
+    if err != nil {
+		log.Println("Error reading path", fullFilepath, err)
+		w.WriteHeader(400)
+        return
+    }
+	mode := fi.Mode() 
+	if mode.IsRegular() { //If the URL is to a file, then use raw mode to return file contents
+		log.Println("Path is a file, so will return its contents in raw mode")
+		rawServer := &rawServer{}
+		rawServer.ServeHTTP(w, r)
+		return 
+	}
+
+
 	files, err := ioutil.ReadDir(fullFilepath)
 	if err != nil {
 		log.Println("List Directory Error: ", err)
@@ -1237,10 +1268,20 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	headerServer := &fileHeaderServer{}
 	rawServer := &rawServer{}
 	directoryListServer :=&directoryListServer{}
+	locationListServer :=&locationListServer{}
 
 	mode, ok := getURLArgumentString(r, "mode")
 	if !ok {
-		directoryListServer.ServeHTTP(w, r) // if mode not present then try to process as list file in path
+		pathData := strings.Split(r.URL.Path, "/")
+
+		if len(pathData) ==2 || (len(pathData) ==3 && pathData[2]==""){ //If no path is specified after /sds/ then list locations
+			locationListServer.ServeHTTP(w, r)
+			return
+		} else {
+
+		directoryListServer.ServeHTTP(w, r) // if mode not present then try to process as either filename or directory
+		return
+		}
 	} else {
 
 		switch mode {
