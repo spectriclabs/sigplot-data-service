@@ -3,6 +3,7 @@ module sigplot-data-service
 go 1.13
 
 require (
+	github.com/elazarl/go-bindata-assetfs v1.0.0
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/minio/minio-go/v6 v6.0.47
 	github.com/tkanos/gonfig v0.0.0-20181112185242-896f3d81fadf

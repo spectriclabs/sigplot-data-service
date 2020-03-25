@@ -46,6 +46,21 @@ func TestDirectoryHandler(t *testing.T) {
 	_ = DirectoryHandler(t,locationName)
 }
 
+func TestDirectoryHandler2(t *testing.T) {
+	locationName := "TestDir"
+	_ = DirectoryHandler(t,locationName)
+}
+
+func TestDirectoryHandler3(t *testing.T) {
+	locationName := "ServiceDir/tests/"
+	_ = DirectoryHandler(t,locationName)
+}
+
+func TestDirectoryHandler4(t *testing.T) {
+	locationName := "ServiceDir/tests"
+	_ = DirectoryHandler(t,locationName)
+}
+
 func TestFileHandler(t *testing.T) {
 	locationName := "TestDir/mydata_SB_60_60.tmp"
 	returnData := DirectoryHandler(t,locationName)

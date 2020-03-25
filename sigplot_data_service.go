@@ -1263,7 +1263,9 @@ func (s *directoryListServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 type routerServer struct{}
 
 func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//Valid url is /sds/<filename>?mode=rds or //Valid url is /sds/<filename>?mode=hdr
+	//This function serves as the router for the url to get to the correct handler.
+	//URLs without a mode, act like URL to directories, location, or files which return the appropriate contents and don't do any specific SDS functions
+	//URLs with ?mode=rds or ?mode=hdr route to their respective SDS handler types. 
 	rdsServer := &rdsServer{}
 	headerServer := &fileHeaderServer{}
 	rawServer := &rawServer{}
@@ -1289,7 +1291,7 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rdsServer.ServeHTTP(w, r)
 		case "hdr": //Valid url is /sds/path/to/file/<filename>?mode=hdr
 			headerServer.ServeHTTP(w, r)
-		case "raw": //Valid url is /sds/path/to/file/<filename>?mode=hdr
+		case "raw": //Valid url is /sds/path/to/file/<filename>?mode=raw
 			rawServer.ServeHTTP(w, r)
 		default:
 			log.Println("Unknown Mode")
