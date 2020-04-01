@@ -40,11 +40,14 @@ export default class SigPlotHrefLayerComponent extends Component {
 
         // add the overlay
         let options = {};
+	if (this.args.options) {
+	    options = this.args.options;
+	}
         if (this.args.layerType) {
             options.layerType = this.args.layerType;
         }
         if (this.args.href) {
-            this.lynN = this._plot.plot.overlay_href(this.args.href, (hcb, lyrN) => { this.lyrN = lyrN }, options);
+            this.lyrN = this._plot.plot.overlay_href(this.args.href, null, options);
         }
     }
 

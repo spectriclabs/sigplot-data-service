@@ -26,7 +26,7 @@
         </div>
         <div class="col-md" style="margin: 10px;">
             <SigPlot id="plot_sds" style="width: 100%; height: 100%;" @options={{hash cmode=6}} as |plot|>
-                <SigPlotHrefLayer @plot={{plot}} @href={{this.sdsHref}} @layerType="SDS"/>
+                <SigPlotHrefLayer @plot={{plot}} @href={{this.sdsHref}} @layerType="SDS" @options={{hash useTiles=true}}/>
             </SigPlot>
         </div>
     </div>
