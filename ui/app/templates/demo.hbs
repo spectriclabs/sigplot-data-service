@@ -1,3 +1,4 @@
+<SigPlotMimic as |mimicGroup|>
 <div class="container-fluid fill">
     <div class="row">
         <div class="col-md" style="min-height: 400px; margin: 10px;">
@@ -8,7 +9,7 @@
             </ul>
         </div>
         <div class="col-md" style="margin: 10px;">
-            <SigPlot id="plot_direct" style="width: 100%; height: 100%;" @options={{hash cmode=6}} as |plot|>
+            <SigPlot id="plot_direct" style="width: 100%; height: 100%;" @options={{hash cmode=6}} @mimic={{mimicGroup.bidir}} as |plot|>
                 <SigPlotHrefLayer @plot={{plot}} @href={{this.rawHref}} />
             </SigPlot>
         </div>
@@ -25,9 +26,10 @@
             </dl>
         </div>
         <div class="col-md" style="margin: 10px;">
-            <SigPlot id="plot_sds" style="width: 100%; height: 100%;" @options={{hash cmode=6}} as |plot|>
+            <SigPlot id="plot_sds" style="width: 100%; height: 100%;" @options={{hash cmode=6}} @mimic={{mimicGroup.bidir}} as |plot|>
                 <SigPlotHrefLayer @plot={{plot}} @href={{this.sdsHref}} @layerType="SDS" @options={{hash useTiles=true}}/>
             </SigPlot>
         </div>
     </div>
 </div>
+</SigPlotMimic>
