@@ -40,21 +40,33 @@ def make_2d_data(x,y,file_format):
 
 def make_2d_data_np(x,y,file_format):
     """ makes fake 2D data where the data set returned is x by y in size and the value of each value is x-y """
+    complex_file = False
+    if file_format[0] in ("C","c"):
+        complex_file = True
 
     data = []
     for yy in range(y):
         data.append(np.empty(x))
-        if (yy < 1000) :
+        if (yy < (x/6)) :
             print "Making 0 line"
             for xx in range(x):
-                data[yy][xx]=(0)
-        elif (yy > 5000) :
+                if not(complex_file):
+                    data[yy][xx]=(0)
+                else:
+                    data[yy][xx]=(0+0j)
+        elif (yy >= (x*5/6)) :
             print "Making 10 line"
             for xx in range(x):
-                data[yy][xx]=(10)
+                if not(complex_file):
+                    data[yy][xx]=(10)
+                else:
+                    data[yy][xx]=(10+10j)
         else:
             for xx in range(x):
-                data[yy][xx]=(xx/600)
+                if not(complex_file):
+                    data[yy][xx]=(xx/6)
+                else:
+                    data[yy][xx]=(xx/6)*(1+1j)
 
     return data 
 
@@ -74,9 +86,9 @@ def make_midas_header(xfile,yfile,file_format):
     return hdr
 
 if __name__ == "__main__":
-    xfile = 6000
-    yfile = 6000
-    file_format = "SB"
+    xfile = 480
+    yfile = 480
+    file_format = "SP"
     
     filename = "mydata_%s_%s_%s" %(file_format,xfile,yfile)
     blue = True
@@ -85,7 +97,7 @@ if __name__ == "__main__":
         filename = filename+".tmp"
         hdr = make_midas_header(xfile,yfile,file_format)
         data = make_2d_data_np(xfile,yfile,file_format)
-       # print("len data", len(data), len(data[0]),type(data),type(data[0]))
+        print("len data", len(data), len(data[0]),type(data),type(data[0]))
         bluefile.write(filename, hdr, data)
 
     else:
