@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"encoding/binary"
-	"log"
 	"math"
 )
 
@@ -47,7 +46,6 @@ type rdsRequest struct {
 
 }
 func (request *rdsRequest) computeYSize () {
-	log.Println("Computing Y Size", request.FileDataSize,request.FileFormat,request.FileXSize )
 	request.FileYSize = int(float64(request.FileDataSize) / bytesPerAtomMap[string(request.FileFormat[1])])/(request.FileXSize)
 	if string(request.FileFormat[0]) == "C" {
 		request.FileYSize = request.FileYSize/2
@@ -133,6 +131,7 @@ type Configuration struct {
 	Logfile         string     `json:"logfile"`
 	CacheMaxBytes   int64      `json:"cacheMaxBytes"`
 	CheckCacheEvery int        `json:"checkCacheEvery"`
+	MaxBytesZminZmax int 	   `json:"maxBytesZminZmax"`
 	LocationDetails []Location `json:"locationDetails"`
 }
 

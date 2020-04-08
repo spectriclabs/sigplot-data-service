@@ -40,13 +40,11 @@ func createDirectory(path string) bool {
 
 func urlToCacheFileName(url string, query string) string {
 
-	pathData := strings.Split(url, "/")
-	fileLocation := pathData[2]
-	fileName := pathData[len(pathData)-1]
-	response := fmt.Sprintf("%s_%s_%s", fileLocation, fileName, query)
+	response := fmt.Sprintf("%s_%s", url, query)
 	response = strings.ReplaceAll(response, "&", "")
 	response = strings.ReplaceAll(response, "=", "")
 	response = strings.ReplaceAll(response, ".", "")
+	response = strings.ReplaceAll(response, "/", "")
 
 	return response
 }
@@ -57,7 +55,6 @@ func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	outData, err := ioutil.ReadFile(fullPath)
 	if err != nil {
-		log.Println("Request not in Cache")
 		return outData, false
 	}
 	return outData, true

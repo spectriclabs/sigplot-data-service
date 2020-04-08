@@ -27,7 +27,6 @@ import (
 	"unsafe"
 )
 
-const MAXFILESIZEZMINMAX = 32000
 
 var ioMutex = &sync.Mutex{}
 var zminmaxMutex  = &sync.Mutex{}
@@ -621,7 +620,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 		return reader, fileName, true
 
 	default:
-		log.Println("Unsupported Location Type")
+		log.Println("Unsupported Location Type", currentLocation.LocationName ,currentLocation.LocationType)
 		return nil, "", false
 	}
 
@@ -675,22 +674,25 @@ func (request *rdsRequest) findZminMax() {
 	if ok {
 		request.Zmin = zminmax.Zmin
 		request.Zmax = zminmax.Zmax
-		log.Println("Zmin/Zmax for this file previously computed", request.Zmin, request.Zmax)
 	} else {
-		log.Println("Computing Zmax/Zmin, not previously computed")
-		if (request.FileXSize*request.FileYSize) < MAXFILESIZEZMINMAX { // File is small enough, look at entire file for Zmax/Zmin
+		var zminmaxRequest rdsRequest
+		zminmaxRequest = *request
+		zminmaxRequest.Ysize = 1
+		zminmaxRequest.Xsize = zminmaxRequest.FileXSize
+		zminmaxRequest.Outysize = 1
+		zminmaxRequest.Outxsize = 1
+		zminmaxRequest.OutputFmt = "SD"
+		if (request.FileXSize*request.FileYSize) < configuration.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
+			log.Println("Computing Zmax/Zmin on whole file, not previously computed")
 			min :=make([]float64,request.FileYSize)
 			max :=make([]float64,request.FileYSize)
 			done := make(chan bool, 1)
-			var zminmaxRequest rdsRequest
-			zminmaxRequest = *request
-			zminmaxRequest.Ysize = 1
 			for line:=0;line<request.FileYSize;line++ {
 				zminmaxRequest.Ystart = line
 				zminmaxRequest.Transform = "min"
-				go processline(min, 0, done, zminmaxRequest)
+				go processline(min, line, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
-				go processline(max, 0, done, zminmaxRequest)
+				go processline(max, line, done, zminmaxRequest)
 			}
 			for i := 0; i < request.FileYSize*2; i++ {
 				<-done
@@ -699,14 +701,11 @@ func (request *rdsRequest) findZminMax() {
 			request.Zmax = floats.Max(max)
 			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin,request.Zmax}
 		} else { // If file is large then check the first, last, and a number of middles lines 
-			numMiddlesLines:= int(math.Max(float64((MAXFILESIZEZMINMAX/request.FileXSize)-2),0))
+			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed")
+			numMiddlesLines:= int(math.Max(float64((configuration.MaxBytesZminZmax/request.FileXSize)-2),0))
 			min :=make([]float64,2+numMiddlesLines)
 			max :=make([]float64,2+numMiddlesLines)
 			done := make(chan bool, 1)
-			var zminmaxRequest rdsRequest
-			zminmaxRequest = *request
-			zminmaxRequest.Ysize = 1
-
 			// Process Min and Max of first line
 			zminmaxRequest.Ystart = 0
 			zminmaxRequest.Transform = "min"
@@ -1074,6 +1073,8 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
 
+	} else {
+		log.Println("Request in cache - returning data from cache")
 	}
 
 	elapsed := time.Since(start)
@@ -1126,6 +1127,7 @@ type fileHeaderServer struct{}
 
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
+	log.Println("fileHeaderServer", r.URL.Path)
 	reader, fileName, succeed := openDataSource(r.URL.Path,3)
 	if !succeed {
 		log.Println("Error Reading from Data Source")
@@ -1307,9 +1309,7 @@ type fileSystemServer struct{}
 
 func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-	// ********************************
-	// TODO: Need to add Logic for LocationName vs real file. 
-	// ********************************
+	log.Println("fileSystemServer", r.URL.Path)
 	pathData := strings.Split(r.URL.Path, "/")
 
 	if len(pathData) ==3 || (len(pathData) ==4 && pathData[3]==""){ //If no path is specified after /sds/ then list locations

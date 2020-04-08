@@ -6,11 +6,11 @@ import { inject as service } from '@ember/service';
 export default class SdsService extends Service {
     @service notify;
 
-    url = config.APP.SDS_URL + "/sdsdata/" // TODO we shouldn't hardcode the /sdsdata/ URL
+    url = config.APP.SDS_URL  // TODO we shouldn't hardcode the /sdsdata/ URL
 
     async getFiles() {
         try {
-            const response = await fetch(this.url);
+            const response = await fetch(this.url+ "/fs/sdsdata/");
             if (response.ok) {
                 const files = await response.json();
                 return files;
@@ -23,7 +23,7 @@ export default class SdsService extends Service {
         }
     }
 
-    getFileUrl(file) {
-        return this.url + file;
+    getFileUrl(file,mode) {
+        return this.url +"/"+ mode + "/sdsdata/" + file;
     }
 }

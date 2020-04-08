@@ -16,8 +16,8 @@ export default class DemoController extends Controller {
 
     @action
     plotFile(file) {
-        this.sdsHref = this.sds.getFileUrl(file);
-        this.rawHref = this.sds.getFileUrl(file) + "?mode=raw";
+        this.sdsHref = this.sds.getFileUrl(file,"hdr");
+        this.rawHref = this.sds.getFileUrl(file, "fs");
     }
 
 }
