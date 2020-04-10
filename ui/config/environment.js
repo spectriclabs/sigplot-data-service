@@ -1,7 +1,7 @@
 'use strict';
 
 // TODO how can we figure out to get this to run within the SDS GO APP behind a reverse proxy?
-let SDS_URL = "/sigplot/sds/";
+let SDS_URL = "/sigplot/sds";
 
 if (process.env.SDS_URL) {
   SDS_URL = process.env.SDS_URL;
