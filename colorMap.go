@@ -48,7 +48,7 @@ func getColorConrolPoints(colorMap string) []colorPoint {
 		outColors[0] = colorPoint{0, 0, 0, 0}
 		outColors[1] = colorPoint{60, 50, 50, 50}
 		outColors[2] = colorPoint{100, 100, 100, 100}
-	case "RampColormap":
+	case "Ramp Colormap":
 		outColors = make([]colorPoint, 7)
 		outColors[0] = colorPoint{0, 0, 0, 15}
 		outColors[1] = colorPoint{10, 0, 0, 50}
@@ -57,7 +57,7 @@ func getColorConrolPoints(colorMap string) []colorPoint {
 		outColors[4] = colorPoint{70, 75, 80, 0}
 		outColors[5] = colorPoint{83, 100, 60, 0}
 		outColors[6] = colorPoint{100, 100, 0, 0}
-	case "ColorWheel":
+	case "Color Wheel":
 		outColors = make([]colorPoint, 7)
 		outColors[0] = colorPoint{0, 100, 100, 0}
 		outColors[1] = colorPoint{20, 0, 80, 40}

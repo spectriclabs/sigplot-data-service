@@ -78,7 +78,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		case "B":
 			var numSlice = make([]int8, len(dataIn))
 			for i := 0; i < len(numSlice); i++ {
-				numSlice[i] = int8(dataIn[i])
+				numSlice[i] = int8(math.Round(dataIn[i]))
 			}
 
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
@@ -88,7 +88,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		case "I":
 			var numSlice = make([]int16, len(dataIn))
 			for i := 0; i < len(numSlice); i++ {
-				numSlice[i] = int16(dataIn[i])
+				numSlice[i] = int16(math.Round(dataIn[i]))
 			}
 
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
@@ -98,7 +98,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		case "L":
 			var numSlice = make([]int32, len(dataIn))
 			for i := 0; i < len(numSlice); i++ {
-				numSlice[i] = int32(dataIn[i])
+				numSlice[i] = int32(math.Round(dataIn[i]))
 			}
 
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
@@ -275,19 +275,16 @@ func down_sample_line_inx(datain []float64, outxsize int, transform string, outD
 	var xelementsperoutput float64
 	xelementsperoutput = float64(len(datain)) / float64(outxsize)
 	//var thinxdata = make([]float64,outxsize)
-	if xelementsperoutput > 1 {
-
-		var xelementsperoutput_ceil int = int(math.Ceil(xelementsperoutput))
+	if xelementsperoutput > 1 { // Expansion 
 		for x := 0; x < outxsize; x++ {
 			var startelement int
 			var endelement int
-			if x != (outxsize - 1) {
+			if x != (outxsize - 1) { // Not last element
 				startelement = int(math.Round(float64(x) * xelementsperoutput))
-				endelement = startelement + xelementsperoutput_ceil
-
-			} else {
+				endelement = int(math.Round(float64(x+1) * xelementsperoutput))
+			} else { // Last element, work backwards 
 				endelement = len(datain)
-				startelement = endelement - xelementsperoutput_ceil
+				startelement = endelement - int(math.Ceil(xelementsperoutput))
 			}
 
 			outData[outLineNum*outxsize+x] = doTransform(datain[startelement:endelement], transform)
@@ -441,7 +438,7 @@ func processline(outData []float64, outLineNum int, done chan bool, dataRequest 
 	
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
-	if bytesPerAtom < 0 {
+	if bytesPerAtom < 1 {
 		dataStartBit := int(math.Mod(firstDataByte, 1) * 8)
 		dataEndBit := int(math.Mod(bytesLength, 1) * 8)
 		var extraBits int = 0
@@ -480,16 +477,22 @@ func processRequest(dataRequest rdsRequest) []byte {
 		// For Each Output Y line Read and process the required lines from the input file
 		var startLine int
 		var endLine int
-
-		if outputLine != (dataRequest.Outysize - 1) {
-			//log.Println("Not Last Line. yLinesPerOutput
+		if yLinesPerOutput > 1 { // Y Compression is needed. 
+			if outputLine!=dataRequest.Outysize-1 { //Not the last output line of file
+				startLine = dataRequest.Ystart + int(math.Round(float64(outputLine)*yLinesPerOutput))
+				endLine = dataRequest.Ystart + int(math.Round(float64(outputLine+1)*yLinesPerOutput))
+			} else { // Last outputline, work backwards from last line. 
+				endLine = dataRequest.Ystart + dataRequest.Ysize
+				startLine = endLine - yLinesPerOutputCeil
+			}
+		} else { // Y expansion 
 			startLine = dataRequest.Ystart + int(math.Round(float64(outputLine)*yLinesPerOutput))
-			endLine = startLine + yLinesPerOutputCeil
-		} else { //Last OutputLine, use the last line and work backwards the lineperoutput
-			endLine = dataRequest.Ystart + dataRequest.Ysize
-			startLine = endLine - yLinesPerOutputCeil
+			endLine = startLine+ 1
+			if endLine > (dataRequest.Ystart+dataRequest.Ysize - 1) { // Last outputlines, work backwards from last line. 
+				endLine = dataRequest.Ystart + dataRequest.Ysize
+				startLine = endLine - 1
+			}
 		}
-
 		// Number of y lines that will be processed this time through the loop
 		numLines := endLine - startLine
 
@@ -1018,7 +1021,7 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if tileRequest.Xstart>tileRequest.FileXSize || tileRequest.Ystart>tileRequest.FileYSize {
+		if tileRequest.Xstart>=tileRequest.FileXSize || tileRequest.Ystart>=tileRequest.FileYSize {
 			log.Println("Invalid Tile Request. " , tileRequest.Xstart, tileRequest.FileXSize, tileRequest.Ystart, tileRequest.FileYSize)
 			w.WriteHeader(400)
 			return
