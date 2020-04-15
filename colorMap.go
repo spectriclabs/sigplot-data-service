@@ -19,6 +19,9 @@ func makeColorPalette(controlColors []colorPoint, numColors int) []colorPoint {
 	//If first control color is not at 0 then copy color for range
 	lastIndexFilled := 0
 	outColors := make([]colorPoint, numColors)
+	outColors[0].red = math.Round(controlColors[0].red*255.0/100.0)
+	outColors[0].blue = math.Round(controlColors[0].blue*255.0/100.0)
+	outColors[0].green= math.Round(controlColors[0].green*255.0/100.0)
 	for i := 1; i < len(controlColors); i++ {
 		//possDiff:=controlColors[i].position-lastPoint.position
 		redDiff := (float64(controlColors[i].red) - float64(lastPoint.red)) * 255.0 / 100
@@ -27,7 +30,8 @@ func makeColorPalette(controlColors []colorPoint, numColors int) []colorPoint {
 		startRange := lastIndexFilled + 1
 		endRange := int(math.Round(float64(controlColors[i].position) * float64(colorsPerPosition)))
 		for j := startRange; j < endRange; j++ {
-			percentRange := (float64(j) - float64(startRange)) / float64((endRange - startRange-1))
+			
+			percentRange := (float64(j+1) - float64(startRange)) / float64((endRange - startRange))
 			outColors[j].red = (math.Round(percentRange*redDiff + float64(lastPoint.red)*255.0/100))
 			outColors[j].green = (math.Round(percentRange*greenDiff + float64(lastPoint.green)*255.0/100))
 			outColors[j].blue = (math.Round(percentRange*blueDiff + float64(lastPoint.blue)*255.0/100))

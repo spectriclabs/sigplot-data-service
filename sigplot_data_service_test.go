@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"strconv"
 	"os"
+	"math"
+//	"log"
 //	"fmt"
 )
 
@@ -126,10 +128,10 @@ func TestHDRHandlerTestDir(t *testing.T) {
 	HDRHandler(t,"TestDir")
 }
 
-func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,tileX,tileY int) {
+func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,tileX,tileY int,outfmt string,expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	locationName := "TestDir"
-	sdsurl := "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename
+	sdsurl := "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
 
 	req, err := http.NewRequest("GET", sdsurl, nil)
 
@@ -147,11 +149,45 @@ func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,t
 	if (rr.Code != http.StatusOK) {
 		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
 	}
-	t.Log("Got response of length: " , len(rr.Body.Bytes()))
+	for i:=0; i<len(expectedReturn); i++ {
+		if rr.Body.Bytes()[i] != expectedReturn[i] {
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v",i, rr.Body.Bytes()[i] , expectedReturn[i])
+		}
+	}
 }
 
 func TestFirstTile(t *testing.T) {
-	RDSTileHandler(t,"mydata_SB_60_60.tmp",100,100,1,1,0,0)
+	tileXsize := 100
+	tileYsize := 100
+	tileX := 0
+	tileY := 0
+	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+}
+func TestMiddleTile(t *testing.T) {
+	tileXsize := 100
+	tileYsize := 100
+	tileX := 1
+	tileY := 1
+	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+}
+func TestMiddleLargeTile(t *testing.T) {
+	tileXsize := 200
+	tileYsize := 300
+	tileX := 1
+	tileY := 1
+	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+}
+
+func TestPartialTile(t *testing.T) {
+	tileXsize := 400
+	tileYsize := 400
+	tileX := 1
+	tileY := 1
+	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
 }
 
 func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,outysize int, transform, cxmode, colormap , zmin,zmax string, expectedReturn []byte) {
@@ -159,7 +195,14 @@ func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1)+"/"+strconv.Itoa(y1)+"/"+strconv.Itoa(x2)+"/"+strconv.Itoa(y2)+"/"+strconv.Itoa(outxsize)+"/"+strconv.Itoa(outysize)+"/"+locationName+"/"+filename
 
-	sdsurl = sdsurl+"?transform=" + transform + "&cxmode=" + cxmode +"&colormap=" + colormap + "&zmin=" +  zmin+"&zmax=" + zmax+ "&outfmt=RGBA"
+	sdsurl = sdsurl+"?transform=" + transform + "&cxmode=" + cxmode +"&colormap=" + colormap + "&outfmt=RGBA" 
+	
+	if zmin != "skip" {
+		sdsurl =sdsurl+"&zmin=" +  zmin
+	}
+	if zmax != "skip" {
+		sdsurl =sdsurl+"&zmax=" +  zmax
+	}
 
 	t.Log("url:", sdsurl)
 	req, err := http.NewRequest("GET", sdsurl, nil)
@@ -245,6 +288,37 @@ func makeWholeExpectedData(size int) []byte {
 	return expectedReturn
 }
 
+func makeTileExpectedData(size, tileXsize,tileYsize,tileX,tileY int) []byte {
+	var startLine,endLine,startColumn,endColumn int
+	
+	startLine = tileY*tileYsize
+	endLine = int(math.Min(float64(startLine+tileYsize),float64(size)))
+	startColumn = tileX*tileXsize
+	endColumn = int(math.Min(float64(startColumn+tileXsize),float64(size)))
+	expectedReturn := make([]byte,(endColumn-startColumn)*(endLine-startLine)) 
+	for line:=startLine; line<endLine; line++ {	
+		if line<(size/6) {
+			//Lines all 0 
+			for column:=startColumn; column<endColumn; column++ {
+				expectedReturn[(line-startLine)*(endColumn-startColumn)+(column-startColumn)] = 0
+			}
+
+		} else if line>=(5*size/6) {
+			//Lines all 10
+			for column:=startColumn; column<endColumn; column++ {
+				expectedReturn[(line-startLine)*(endColumn-startColumn)+(column-startColumn)] = 10
+			}
+
+		} else {
+			//Lines moving up from 0 to 9 
+			for column:=startColumn; column<endColumn; column++ {
+				expectedReturn[(line-startLine)*(endColumn-startColumn)+(column-startColumn)] = uint8(column/(size/10))
+			}
+		}
+	}
+	return expectedReturn
+}
+
 func TestFirstPoint(t *testing.T) {
 	expectedReturn := make([]byte,1)
 	expectedReturn[0] = 0 
@@ -293,11 +367,11 @@ func TestMiddlePoint10Log(t *testing.T) {
 
 func TestMiddlePoints20LogColormap(t *testing.T) {
 	expectedReturn := make([]byte,4) 
-	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 12.04. By setting the zmin to 12.04, the colormap should return the first value which is 0,0,0. 
+	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 12.04. By setting the zmin to 12.04, the colormap should return the first value which is 0,0,38. 
 	expectedReturn[1] = 0 
-	expectedReturn[2] = 0 
+	expectedReturn[2] = 38 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","RampColormap", "12.04","50", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "12.04","50", expectedReturn)
 }
 
 func TestMiddlePoints20LogColormapMax(t *testing.T) {
@@ -306,7 +380,7 @@ func TestMiddlePoints20LogColormapMax(t *testing.T) {
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","RampColormap", "0","12.04", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","12.04", expectedReturn)
 }
 
 func TestMiddlePoints20LogColormapMiddle(t *testing.T) {
@@ -315,7 +389,84 @@ func TestMiddlePoints20LogColormapMiddle(t *testing.T) {
 	expectedReturn[1] = 204 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","RampColormap", "0","24.0824", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","24.0824", expectedReturn)
+}
+
+func TestFirstMiddlePointsColormapNoZinZmax(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 0 // Should return lowest value in colormap "Ramp Colormap"
+	expectedReturn[1] = 0 
+	expectedReturn[2] = 38 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Ramp Colormap", "skip","skip", expectedReturn)
+}
+
+func TestFirstMiddlePointsColormapNoZinZmaxGreyscale(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 0 // Should return lowest value in colormap "Ramp Colormap"
+	expectedReturn[1] = 0 
+	expectedReturn[2] = 0 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Greyscale", "skip","skip", expectedReturn)
+}
+func TestFirstMiddlePointsColormapNoZinZmaxColorWheel(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 255 // Should return lowest value in colormap "Color Wheel"
+	expectedReturn[1] = 255 
+	expectedReturn[2] = 0 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Color Wheel", "skip","skip", expectedReturn)
+}
+func TestFirstMiddlePointsColormapNoZinZmaxSpectrum(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 0 // Should return lowest value in colormap "Spectrum"
+	expectedReturn[1] = 191 
+	expectedReturn[2] = 0 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Spectrum", "skip","skip", expectedReturn)
+}
+
+func TestFirstMiddlePointsColormapNoZinZmaxcalewhite(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 255 // Should return lowest value in colormap "calewhite"
+	expectedReturn[1] = 255 
+	expectedReturn[2] = 255 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","calewhite", "skip","skip", expectedReturn)
+}
+
+func TestFirstMiddlePointsColormapNoZinZmaxHotDesat(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 71 // Should return lowest value in colormap "HotDesat"
+	expectedReturn[1] = 71 
+	expectedReturn[2] = 219 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","HotDesat", "skip","skip", expectedReturn)
+}
+func TestFirstMiddlePointsColormapNoZinZmaxSunset(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 26 // Should return lowest value in colormap "Sunset"
+	expectedReturn[1] = 0 
+	expectedReturn[2] = 59 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Sunset", "skip","skip", expectedReturn)
+}
+
+func TestMeanMiddlePointsColormapNoZinZmax(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, mean value will return 1. 
+	expectedReturn[0] = 0 // Should 10% point from "Ramp Colormap"
+	expectedReturn[1] = 0 
+	expectedReturn[2] = 128 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"mean","Re","Ramp Colormap", "skip","skip", expectedReturn)
 }
 
 func TestFullReducedMax(t *testing.T) {

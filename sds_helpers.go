@@ -47,16 +47,6 @@ func getURLQueryParamString(r *http.Request, keyname string) (string, bool) {
 	return keys[0], true
 }
 
-func getURLArgumentFloat(url string, positionNum int) (float64, bool) {
-	pathData := strings.Split(url, "/")
-	param := pathData[positionNum]
-	retval, err := strconv.ParseFloat(param, 64)
-	if err != nil {
-		return 0.0, false
-	}
-	return retval, true
-}
-
 func getURLArgumentInt(url string, positionNum int) (int, bool) {
 	pathData := strings.Split(url, "/")
 	param := pathData[positionNum]
@@ -65,15 +55,6 @@ func getURLArgumentInt(url string, positionNum int) (int, bool) {
 		return 0, false
 	}
 	return retval, true
-}
-
-func stringInSlice(a string, list []string) bool {
-    for _, b := range list {
-        if b == a {
-            return true
-        }
-    }
-    return false
 }
 
 func intInSlice(a int, list []int) bool {
@@ -85,11 +66,3 @@ func intInSlice(a int, list []int) bool {
     return false
 }
 
-func getURLArgumentSting(url string, positionNum int) (string, bool) {
-	pathData := strings.Split(url, "/")
-	param := pathData[positionNum]
-	if param !="" {
-		return param, true
-	}
-	return "",false
-}

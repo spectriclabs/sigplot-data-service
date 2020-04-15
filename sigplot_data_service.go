@@ -51,8 +51,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		if zmax != zmin {
 			colorsPerSpan := (zmax - zmin) / float64(numColors)
 			for i := 0; i < len(dataIn); i++ {
-				// Check for dataIn[i] is NaN
-				colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)
+				colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)-1
 				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
 				a := 255
 				//log.Println("colorIndex", colorIndex,dataIn[i],zmin,zmax,colorsPerSpan)
@@ -682,6 +681,7 @@ func (request *rdsRequest) findZminMax() {
 		zminmaxRequest = *request
 		zminmaxRequest.Ysize = 1
 		zminmaxRequest.Xsize = zminmaxRequest.FileXSize
+		zminmaxRequest.Xstart = 0
 		zminmaxRequest.Outysize = 1
 		zminmaxRequest.Outxsize = 1
 		zminmaxRequest.OutputFmt = "SD"
