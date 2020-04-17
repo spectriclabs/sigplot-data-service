@@ -239,6 +239,15 @@ func doTransform(dataIn []float64, transform string) float64 {
 			num = 0
 		}
 		return num
+	default: //Default to first if bad value. 
+		log.Println("Unknown transform", transform, "using first")
+		num := dataIn[0]
+		if math.IsNaN(num) {
+			log.Println("DoTransform produced NaN")
+			num = 0
+		}
+		return num
+
 	}
 	return 0
 }
@@ -373,6 +382,9 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 				mag2 := datain[i]*datain[i] + datain[i+1]*datain[i+1]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i/2] = 20 * math.Log10(mag2)
+			default: //Defaults to "real"
+				log.Println("Unkown cxmode" , cxmode, "defaulting to Re")
+				outData[i/2] = datain[i]
 			}
 
 		}
@@ -381,8 +393,11 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 
 		switch cxmode {
 		case "Ma":
-			floats.Mul(datain, datain)
-			return datain
+			outData := make([]float64, len(datain))
+			for i := 0; i < len(datain); i++ {
+				outData[i] = math.Sqrt(datain[i]*datain[i]*2)
+			}
+			return outData
 		case "Ph":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
@@ -399,7 +414,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Lo":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := datain[i] * datain[i]
+				mag2 := 2*datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 10 * math.Log10(mag2)
 			}
@@ -407,14 +422,14 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "L2":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := datain[i] * datain[i]
+				mag2 := 2*datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 20 * math.Log10(mag2)
 			}
 			return outData
 
 		}
-		return datain
+		return datain //Defaults to "Real" or passthrough
 
 	}
 }
@@ -644,7 +659,7 @@ func (request *rdsRequest) getQueryParams(r *http.Request) {
 	request.CxmodeSet = true
 	request.Cxmode, ok = getURLQueryParamString(r, "cxmode")
 	if !ok {
-		request.Cxmode = "mag"
+		request.Cxmode = "Re"
 		request.CxmodeSet = false
 	}
 	var zminSet,zmaxSet bool
@@ -842,6 +857,26 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if rdsRequest.Xsize > rdsRequest.FileXSize {
 			log.Println("Invalid Request. Requested X size greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X1> rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X1 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X2> rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X2 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.Y1> rdsRequest.FileYSize {
+			log.Println("Invalid Request. Requested Y1 greater than file Y size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.Y2> rdsRequest.FileYSize {
+			log.Println("Invalid Request. Requested Y2 greater than file Y size")
 			w.WriteHeader(400)
 			return
 		}

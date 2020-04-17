@@ -3,6 +3,7 @@
     "cacheLocation": "./sdscache/",
     "cacheMaxBytes": 100000000,
     "checkCacheEvery":60,
+    "maxBytesZminZmax": 10000,
     "locationDetails": [{
                             "locationName":     "ServiceDir",
                             "locationType":     "localFile",

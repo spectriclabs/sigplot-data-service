@@ -18,6 +18,8 @@ import (
 // Tests use the data file, "mydata_SB_600_600.tmp". This file is a 600 by 600 scaler byte file where it is 0 for the first 100  lines and 10 for the last 100 lines. 
 // For lines between 101-500 it changes based on x value with 10 equal sized portions. Each section of 60 columns increases by 1 starting from 0 and going to 9.
 // For example, lines 0-59, are 0, 60-119 are 1 ... 540-599 are 9. 
+// Test files of "mydata_XX_60_60.tmp" are the same format but on 60x 60 in size. 
+
 
 
 func FSHandler(t *testing.T,locationName string) []byte{
@@ -43,6 +45,29 @@ func FSHandler(t *testing.T,locationName string) []byte{
 	}
 	return rr.Body.Bytes()
 }
+func TestBaddModeHandler(t *testing.T) {
+	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+    // Create a request to pass to our handler. 
+	
+	sdsurl := "/sds/bad/" 
+	//t.Log("url", sdsurl)
+	req, err := http.NewRequest("GET", sdsurl, nil)
+    if err != nil {
+        t.Fatal(err)
+	}
+
+	setupConfigLogCache()
+
+	rr := httptest.NewRecorder()
+	//handler := http.HandlerFunc(fileHeaderServer)
+	headerServer := &routerServer{}
+	headerServer.ServeHTTP(rr,req)
+
+	if (rr.Code != 400) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, 400)
+	}
+}
+
 func TestDirectoryHandler(t *testing.T) {
 	locationName := "TestDir/"
 	_ = FSHandler(t,locationName)
@@ -128,7 +153,7 @@ func TestHDRHandlerTestDir(t *testing.T) {
 	HDRHandler(t,"TestDir")
 }
 
-func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,tileX,tileY int,outfmt string,expectedReturn []byte) {
+func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,tileX,tileY int,outfmt string, expectedReturnCode int,expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	locationName := "TestDir"
 	sdsurl := "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
@@ -146,8 +171,8 @@ func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,t
 	rdsServer := &routerServer{}
 	rdsServer.ServeHTTP(rr,req)
 
-	if (rr.Code != http.StatusOK) {
-		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, expectedReturnCode)
 	}
 	for i:=0; i<len(expectedReturn); i++ {
 		if rr.Body.Bytes()[i] != expectedReturn[i] {
@@ -156,13 +181,29 @@ func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,t
 	}
 }
 
+func TestInvalidTileRequest(t *testing.T) {
+
+	expectedReturn := make([]byte,0) 
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",10,100,1,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,10,1,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",1000,100,1,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,1000,1,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",350,100,1,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,0,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,0,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,11,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,11,1,0,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,8,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,0,8,"SB",400,expectedReturn)
+}
+
 func TestFirstTile(t *testing.T) {
 	tileXsize := 100
 	tileYsize := 100
 	tileX := 0
 	tileY := 0
 	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
-	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",200,expectedReturn)
 }
 func TestMiddleTile(t *testing.T) {
 	tileXsize := 100
@@ -170,7 +211,7 @@ func TestMiddleTile(t *testing.T) {
 	tileX := 1
 	tileY := 1
 	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
-	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",200,expectedReturn)
 }
 func TestMiddleLargeTile(t *testing.T) {
 	tileXsize := 200
@@ -178,7 +219,7 @@ func TestMiddleLargeTile(t *testing.T) {
 	tileX := 1
 	tileY := 1
 	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
-	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",200,expectedReturn)
 }
 
 func TestPartialTile(t *testing.T) {
@@ -187,10 +228,10 @@ func TestPartialTile(t *testing.T) {
 	tileX := 1
 	tileY := 1
 	expectedReturn := makeTileExpectedData(600,tileXsize,tileYsize,tileX,tileY)
-	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",tileXsize,tileYsize,1,1,tileX,tileY,"SB",200,expectedReturn)
 }
 
-func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,outysize int, transform, cxmode, colormap , zmin,zmax string, expectedReturn []byte) {
+func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,outysize int, transform, cxmode, colormap , zmin,zmax string,  expectedReturnCode int,expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1)+"/"+strconv.Itoa(y1)+"/"+strconv.Itoa(x2)+"/"+strconv.Itoa(y2)+"/"+strconv.Itoa(outxsize)+"/"+strconv.Itoa(outysize)+"/"+locationName+"/"+filename
@@ -218,8 +259,8 @@ func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,
 	rdsServer := &routerServer{}
 	rdsServer.ServeHTTP(rr,req)
 
-	if (rr.Code != http.StatusOK) {
-		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code,expectedReturnCode)
 	}
 
 	for i:=0; i<len(rr.Body.Bytes()); i++ {
@@ -231,7 +272,7 @@ func BaseicRDSHandlerColormap(t *testing.T,filename string,x1,y1,x2,y2,outxsize,
 }
 
 
-func BaseicRDSHandler(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysize int, transform, cxmode,outfmt string, expectedReturn []byte) {
+func BaseicRDSHandler(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysize int, transform, cxmode,outfmt string, expectedReturnCode int,expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1)+"/"+strconv.Itoa(y1)+"/"+strconv.Itoa(x2)+"/"+strconv.Itoa(y2)+"/"+strconv.Itoa(outxsize)+"/"+strconv.Itoa(outysize)+"/"+locationName+"/"+filename
@@ -251,15 +292,26 @@ func BaseicRDSHandler(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysiz
 	rdsServer := &routerServer{}
 	rdsServer.ServeHTTP(rr,req)
 
-	if (rr.Code != http.StatusOK) {
-		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, expectedReturnCode)
 	}
 
+	if len(rr.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v epected %v ",len(rr.Body.Bytes()), len(expectedReturn))
+	}
+
+	var testFail bool = false
 	for i:=0; i<len(rr.Body.Bytes()); i++ {
 		if rr.Body.Bytes()[i] != expectedReturn[i] {
-			//t.Errorf("Values Did not match expected for %v byte: got %v expected %v",i, rr.Body.Bytes()[i] , expectedReturn[i])
+			testFail = true
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v",i, rr.Body.Bytes()[i] , expectedReturn[i])
 		}
 	}
+
+	if testFail {
+		t.Errorf("Values did not match expected data")
+	}
+
 
 }
 
@@ -319,77 +371,133 @@ func makeTileExpectedData(size, tileXsize,tileYsize,tileX,tileY int) []byte {
 	return expectedReturn
 }
 
+func TestInvalidTransform(t *testing.T) {
+	// An unknown transform should result in defaulting to "first."
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 10 
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",59,59,60,60,1,1,"bad","Re","SB",200,expectedReturn)
+}
+func TestInvalidCxMode(t *testing.T) {
+	// An unknown csmode should result in defaulting to "Real"
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 10 
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",59,59,60,60,1,1,"first","bad","SB",200,expectedReturn)
+}
+func TestInvalidCxModeComplex(t *testing.T) {
+	// An unknown cxmode should result in defaulting to "Real"
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 10 
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,1,1,"first","bad","SB",200,expectedReturn)
+}
+
+func TestInvalidOutfmt(t *testing.T) {
+	// A bad outfmt will result in no return data, but not break the service so the the next request should still work 
+	expectedReturn1 := make([]byte,0)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,1,1,"first","Re","bad",200,expectedReturn1)
+
+	expectedReturn2 := make([]byte,1)
+	expectedReturn2[0] = 10 
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,1,1,"first","Re","SB",200,expectedReturn2)
+}
+
+func TestInvalidXYParams(t *testing.T) {
+
+	expectedReturn := make([]byte,0)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,61,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,59,61,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",-1,59,61,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,61,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,0,60,61,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,-1,60,60,1,1,"first","Re","SB",400,expectedReturn)
+}
+
+
 func TestFirstPoint(t *testing.T) {
 	expectedReturn := make([]byte,1)
 	expectedReturn[0] = 0 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,1,1,1,1,"first","Re", "SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,1,1,1,1,"first","Re", "SB",200,expectedReturn)
 }
 
 func TestLastPoint(t *testing.T) {
 	expectedReturn := make([]byte,1)
 	expectedReturn[0] = 10 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",59,59,60,60,1,1,"first","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",59,59,60,60,1,1,"first","Re","SB",200,expectedReturn)
 }
 
 func TestAverageFirst10Point(t *testing.T) {
 	expectedReturn := make([]byte,1)
 	expectedReturn[0] = 0 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,10,10,1,1,"mean","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,10,10,1,1,"mean","Re","SB",200,expectedReturn)
 }
 
 func TestAverageMiddlePoints(t *testing.T) {
 	expectedReturn := make([]byte,1) 
 	expectedReturn[0] = 1 //Input Data is values of 0,1,2 in equal amounts, averaged together be 1 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"mean","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"mean","Re","SB",200,expectedReturn)
 }
 func TestFirstMiddlePoints(t *testing.T) {
 	expectedReturn := make([]byte,1) 
 	expectedReturn[0] = 0 //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","SB",200,expectedReturn)
 }
 func TestMaxMiddlePoints(t *testing.T) {
 	expectedReturn := make([]byte,1) 
 	expectedReturn[0] = 2 //Input Data is values of 0,1,2 in equal amounts, max value will return 2. 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"max","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"max","Re","SB",200,expectedReturn)
 }
 
 func TestMiddlePoint20Log(t *testing.T) {
 	expectedReturn := make([]byte,1) 
-	expectedReturn[0] = 12 //Input Data 2. 20*log10(2*2) = 12.04 which will return 12 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","SB",expectedReturn)
+	expectedReturn[0] = 18 //Input Data 2. 20*log10(2*2+2*2) = 18.06 which will return 18 
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","SB",200,expectedReturn)
 }
 
 func TestMiddlePoint10Log(t *testing.T) {
 	expectedReturn := make([]byte,1) 
-	expectedReturn[0] = 6 //Input Data 2. 20*log10(2*2) = 12.04 which will return 12 
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","Lo","SB",expectedReturn)
+	expectedReturn[0] = 9 //Input Data 2. 10*log10(2*2+2*2) = 9.03 which will return 9 
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","Lo","SB",200,expectedReturn)
+}
+func TestMiddlePointMag(t *testing.T) {
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = 3 //Input Data 2. sqrt(4+4) = 2.82
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","Ma","SB",200,expectedReturn)
+}
+func TestMiddlePointPh(t *testing.T) {
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = byte(math.Atan2(float64(2),float64(2))) //Input Data 2. Phase is atan(2,2)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","Ph","SB",200,expectedReturn)
+}
+func TestMiddlePointIm(t *testing.T) {
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = 0 //Imaginary mode for real data returns 0 
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","Im","SB",200,expectedReturn)
 }
 
 func TestMiddlePoints20LogColormap(t *testing.T) {
 	expectedReturn := make([]byte,4) 
-	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 12.04. By setting the zmin to 12.04, the colormap should return the first value which is 0,0,38. 
+	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2+2*2) = 18.06. By setting the zmin to 12.04, the colormap should return the first value which is 0,0,38. 
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 38 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "12.04","50", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "18.06","50",200, expectedReturn)
 }
 
 func TestMiddlePoints20LogColormapMax(t *testing.T) {
 	expectedReturn := make([]byte,4) 
-	expectedReturn[0] = 255 //Input Data 2. 20*log10(2*2) = 12.04. By setting the zmax to 12.04, the colormap should return the last value which is 255,0,0. 
+	expectedReturn[0] = 255 //Input Data 2. 20*log10(2*2) = 18.06. By setting the zmax to 12.04, the colormap should return the last value which is 255,0,0. 
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","12.04", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","18.06",200, expectedReturn)
 }
 
 func TestMiddlePoints20LogColormapMiddle(t *testing.T) {
 	expectedReturn := make([]byte,4) 
-	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 12.04. By setting the zmax to 0, 24.0824, the colormap should return the middle value which is 0,204,0. 
+	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 18.06. By setting the zmax to 0, 36.123599, the colormap should return the middle value which is 0,204,0. 
 	expectedReturn[1] = 204 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","24.0824", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",17,20,18,21,1,1,"first","L2","Ramp Colormap", "0","36.123599",200, expectedReturn)
 }
 
 func TestFirstMiddlePointsColormapNoZinZmax(t *testing.T) {
@@ -399,7 +507,16 @@ func TestFirstMiddlePointsColormapNoZinZmax(t *testing.T) {
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 38 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Ramp Colormap", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Ramp Colormap", "skip","skip",200, expectedReturn)
+}
+func TestFirstMiddlePointsColormapNoZinZmaxBadColorMap(t *testing.T) {
+
+	expectedReturn := make([]byte,4) //Input Data is values of 0,1,2 in equal amounts, first value will return 0. 
+	expectedReturn[0] = 0 // Should return lowest value in default colormap "Ramp Colormap"
+	expectedReturn[1] = 0 
+	expectedReturn[2] = 38 
+	expectedReturn[3] = 255 //Alpha is always 255
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Bad", "skip","skip",200, expectedReturn)
 }
 
 func TestFirstMiddlePointsColormapNoZinZmaxGreyscale(t *testing.T) {
@@ -409,7 +526,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxGreyscale(t *testing.T) {
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Greyscale", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Greyscale", "skip","skip",200, expectedReturn)
 }
 func TestFirstMiddlePointsColormapNoZinZmaxColorWheel(t *testing.T) {
 
@@ -418,7 +535,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxColorWheel(t *testing.T) {
 	expectedReturn[1] = 255 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Color Wheel", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Color Wheel", "skip","skip",200, expectedReturn)
 }
 func TestFirstMiddlePointsColormapNoZinZmaxSpectrum(t *testing.T) {
 
@@ -427,7 +544,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxSpectrum(t *testing.T) {
 	expectedReturn[1] = 191 
 	expectedReturn[2] = 0 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Spectrum", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Spectrum", "skip","skip",200, expectedReturn)
 }
 
 func TestFirstMiddlePointsColormapNoZinZmaxcalewhite(t *testing.T) {
@@ -437,7 +554,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxcalewhite(t *testing.T) {
 	expectedReturn[1] = 255 
 	expectedReturn[2] = 255 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","calewhite", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","calewhite", "skip","skip",200, expectedReturn)
 }
 
 func TestFirstMiddlePointsColormapNoZinZmaxHotDesat(t *testing.T) {
@@ -447,7 +564,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxHotDesat(t *testing.T) {
 	expectedReturn[1] = 71 
 	expectedReturn[2] = 219 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","HotDesat", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","HotDesat", "skip","skip",200, expectedReturn)
 }
 func TestFirstMiddlePointsColormapNoZinZmaxSunset(t *testing.T) {
 
@@ -456,7 +573,7 @@ func TestFirstMiddlePointsColormapNoZinZmaxSunset(t *testing.T) {
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 59 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Sunset", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"first","Re","Sunset", "skip","skip",200, expectedReturn)
 }
 
 func TestMeanMiddlePointsColormapNoZinZmax(t *testing.T) {
@@ -466,35 +583,35 @@ func TestMeanMiddlePointsColormapNoZinZmax(t *testing.T) {
 	expectedReturn[1] = 0 
 	expectedReturn[2] = 128 
 	expectedReturn[3] = 255 //Alpha is always 255
-	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"mean","Re","Ramp Colormap", "skip","skip", expectedReturn)
+	BaseicRDSHandlerColormap(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,"mean","Re","Ramp Colormap", "skip","skip",200, expectedReturn)
 }
 
 func TestFullReducedMax(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(30)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"max","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"max","Re","SB",200,expectedReturn)
 }
 func TestFullReducedMin(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(30)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"min","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"min","Re","SB",200,expectedReturn)
 }
 
 func TestFullReducedFirst(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(30)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"first","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"first","Re","SB",200,expectedReturn)
 }
 func TestFullReducedMean(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(30)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"mean","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"mean","Re","SB",200,expectedReturn)
 }
 
 func TestFullReducedMaxAbs(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(30)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"maxabs","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,30,30,"maxabs","Re","SB",200,expectedReturn)
 }
 
 func TestFullSameSizeMean(t *testing.T) {
 	expectedReturn := makeWholeExpectedData(60)
-	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,60,60,"mean","Re","SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SB_60_60.tmp",0,0,60,60,60,60,"mean","Re","SB",200,expectedReturn)
 }
 
 func TestFullISameSizeMean(t *testing.T) {
@@ -506,7 +623,7 @@ func TestFullISameSizeMean(t *testing.T) {
 	byteData := new(bytes.Buffer)
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
-	BaseicRDSHandler(t,"mydata_SI_60_60.tmp",0,0,60,60,60,60,"mean","Re","SI",byteData.Bytes())
+	BaseicRDSHandler(t,"mydata_SI_60_60.tmp",0,0,60,60,60,60,"mean","Re","SI",200,byteData.Bytes())
 }
 
 func TestFullLSameSizeMean(t *testing.T) {
@@ -518,7 +635,7 @@ func TestFullLSameSizeMean(t *testing.T) {
 	byteData := new(bytes.Buffer)
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
-	BaseicRDSHandler(t,"mydata_SL_60_60.tmp",0,0,60,60,60,60,"mean","Re","SL",byteData.Bytes())
+	BaseicRDSHandler(t,"mydata_SL_60_60.tmp",0,0,60,60,60,60,"mean","Re","SL",200,byteData.Bytes())
 }
 
 func TestFullFSameSizeMean(t *testing.T) {
@@ -530,7 +647,7 @@ func TestFullFSameSizeMean(t *testing.T) {
 	byteData := new(bytes.Buffer)
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
-	BaseicRDSHandler(t,"mydata_SF_60_60.tmp",0,0,60,60,60,60,"mean","Re","SF",byteData.Bytes())
+	BaseicRDSHandler(t,"mydata_SF_60_60.tmp",0,0,60,60,60,60,"mean","Re","SF",200,byteData.Bytes())
 }
 
 func TestFullDSameSizeMean(t *testing.T) {
@@ -542,7 +659,7 @@ func TestFullDSameSizeMean(t *testing.T) {
 	byteData := new(bytes.Buffer)
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
-	BaseicRDSHandler(t,"mydata_SD_60_60.tmp",0,0,60,60,60,60,"mean","Re","SD",byteData.Bytes())
+	BaseicRDSHandler(t,"mydata_SD_60_60.tmp",0,0,60,60,60,60,"mean","Re","SD",200,byteData.Bytes())
 }
 
 func TestFullCFSameSizeMeanReal(t *testing.T) {
@@ -554,13 +671,75 @@ func TestFullCFSameSizeMeanReal(t *testing.T) {
 	byteData := new(bytes.Buffer)
 	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
 
-	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Im","CF",byteData.Bytes())
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Re","CF",200,byteData.Bytes())
+}
+func TestFullCFSameSizeMeanIm(t *testing.T) {
+	expectedResults := makeWholeExpectedData(60)
+	IntData := make([]float32,len(expectedResults))
+	for i:=0; i< len(IntData); i++ {
+		IntData[i] = float32(expectedResults[i])
+	}
+	byteData := new(bytes.Buffer)
+	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
+
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Im","CF",200,byteData.Bytes())
+}
+func TestFullCFSameSizeMeanMag(t *testing.T) {
+	expectedResults := makeWholeExpectedData(60)
+	IntData := make([]float32,len(expectedResults))
+	for i:=0; i< len(IntData); i++ {
+		IntData[i] = float32(math.Sqrt(float64(expectedResults[i]*expectedResults[i]*2)))
+	}
+	byteData := new(bytes.Buffer)
+	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
+
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Ma","CF",200,byteData.Bytes())
+}
+func TestFullCFSameSizeMeanPh(t *testing.T) {
+	expectedResults := makeWholeExpectedData(60)
+	IntData := make([]float32,len(expectedResults))
+	for i:=0; i< len(IntData); i++ {
+		IntData[i] = float32(math.Atan2(float64(expectedResults[i]),float64(expectedResults[i])))
+	}
+	byteData := new(bytes.Buffer)
+	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
+
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Ph","CF",200,byteData.Bytes())
+}
+
+func TestFullCFSameSizeMeanLo(t *testing.T) {
+	expectedResults := makeWholeExpectedData(60)
+	IntData := make([]float32,len(expectedResults))
+	loThresh := 1.0e-20
+	for i:=0; i< len(IntData); i++ {
+		mag2 := float64(expectedResults[i]*expectedResults[i] + expectedResults[i]*expectedResults[i])
+		mag2 = math.Max(mag2, loThresh)
+		IntData[i] = float32(10 * math.Log10(mag2))
+	}
+	byteData := new(bytes.Buffer)
+	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
+
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","Lo","CF",200,byteData.Bytes())
+}
+func TestFullCFSameSizeMeanL2(t *testing.T) {
+	expectedResults := makeWholeExpectedData(60)
+	IntData := make([]float32,len(expectedResults))
+	loThresh := 1.0e-20
+	for i:=0; i< len(IntData); i++ {
+		mag2 := float64(expectedResults[i]*expectedResults[i] + expectedResults[i]*expectedResults[i])
+		mag2 = math.Max(mag2, loThresh)
+		IntData[i] = float32(20 * math.Log10(mag2))
+	}
+	byteData := new(bytes.Buffer)
+	_ = binary.Write(byteData, binary.LittleEndian, &IntData)
+
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",0,0,60,60,60,60,"mean","L2","CF",200,byteData.Bytes())
 }
 
 func TestFirstPointSP(t *testing.T) {
 	expectedReturn := make([]byte,1) 
 	expectedReturn[0] = 0 //SP file has the bits 0,0,1,1, as the first four
-	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",0,0,1,1,1,1,"first","Re", "SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",0,0,1,1,1,1,"first","Re", "SB",200,expectedReturn)
 }
 
 func TestFourPointsSP(t *testing.T) {
@@ -569,5 +748,5 @@ func TestFourPointsSP(t *testing.T) {
 	expectedReturn[1] = 0
 	expectedReturn[2] = 1
 	expectedReturn[3] = 1
-	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",1,0,4,1,4,1,"first","Re", "SB",expectedReturn)
+	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",1,0,4,1,4,1,"first","Re", "SB",200,expectedReturn)
 }
