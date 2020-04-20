@@ -123,13 +123,33 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 
 			check(err)
+		
+		case "P":
+			extraBits := len(dataIn) % 8
+			for extraBit:=0; extraBit<extraBits; extraBits++{ //Pad zeros to make the number of elements divisable by 8 so it can be packed into a byte
+				dataIn = append(dataIn,0)
+			}
+			numBytes := len(dataIn)/8
+			var numSlice = make([]uint8,numBytes)
+			for i := 0; i < len(numSlice); i++ {
+				for j:=0; j<8; j++ {
+					var bit uint8
+					if dataIn[i*8+j] >0 { //SP Data can only be 0 or 1, so if values is greater than 0, make it a 1. 
+						bit =1
+					} else {
+						bit = 0
+					}
+					numSlice[i] = (numSlice[i] << 1) | bit
+				}
+				
+			}
+			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
+			check(err)
 
 		default:
 			log.Println("Unsupported output type")
 		}
 		//log.Println("out_data" , len(dataOut.Bytes()))
-
-		//TODO for SP: Add a case for P. Need to pack in 8 numbers back into 1 byte
 
 		return dataOut.Bytes()
 	}
@@ -1520,25 +1540,21 @@ func setupConfigLogCache() {
 
 func main() {
 
-
-
-	//Used to profile speed
-	//if *cpuprofile != "" {
-	//	f, err := os.Create(*cpuprofile)
-	//	if err != nil {
-	//		log.Fatal(err)
-	//	}
-	//	pprof.StartCPUProfile(f)
-	//	defer pprof.StopCPUProfile()
-	//}
-	//start := time.Now()
-	//data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
-	//elapsed := time.Since(start)
-	//log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
-
-	
 	setupConfigLogCache()
 
+	//Used to profile speed
+	// if *cpuprofile != "" {
+	// 	f, err := os.Create(*cpuprofile)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// 	pprof.StartCPUProfile(f)
+	// 	defer pprof.StopCPUProfile()
+	// }
+	// start := time.Now()
+	// data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
+	// elapsed := time.Since(start)
+	// log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
 
 
 	// Serve up service on /sds

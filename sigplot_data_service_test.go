@@ -822,6 +822,12 @@ func TestFourPointsSP(t *testing.T) {
 	expectedReturn[3] = 1
 	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",1,0,4,1,4,1,"first","Re", "SB",200,expectedReturn)
 }
+func TestSPOutput(t *testing.T) {
+	expectedReturn := make([]byte,2)
+	expectedReturn[0] = 48 //SP file has the bits 0,0,1,1,0,0,0,0 as the first 8 which is decimal 48
+	expectedReturn[1] = 48
+	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",0,0,16,1,16,1,"first","Re", "SP",200,expectedReturn)
+}
 
 func TestFirstPointSubsize(t *testing.T) {
 	expectedReturn := make([]byte,1)
