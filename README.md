@@ -4,7 +4,6 @@ This is a work in progress of a Sigplot data service (sds) that will provide som
 
 #### Suppoert files in repo
 * makedata.py - a utility used to make 2D data files for the purpose of testing
-* sds.ipynb - a Juypter notebook for interacting and tests the SDS that can request data and plot it.
 
 
 ## URL
@@ -62,6 +61,8 @@ The url for RDS Tile mode is <host:port>/sds/rdstile/<tileXsize>/<tileYsize>/<de
 
 RDS Tiles mode works by thinning the file based on the decimation values provided. If an input file was 3000 by 3000 and a decimation mode for x and y was 3 (deciamte by 4) then the resulting data would be a 750 by 750 file. The those points would be broken up into section based on the tile size. For a tile X size of 100 and a tileYsize of 200, then you would get 8 tiles in each row, the first 7 would have 100 points and the last 50 points. Then 4 tiles in each column with 200 points for the first three, then 150 for the last one. The valid tiles numbesr for x would be 0-7 and y would be 0-3. Tile 7,3 would be the smallest at 50 by 150. 
 
+## Unit Tests
+A series of unit tests are available in sigplot_data_service_test.go. To run just type 'go test' from the source directory. The unit tests use a few data files are are located in th /tests/ directory. 
 
 ## UI Development Mode
 

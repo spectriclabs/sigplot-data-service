@@ -653,7 +653,12 @@ func (request *rdsRequest) getQueryParams(r *http.Request) {
 	request.SubsizeSet = true
 	request.Subsize, ok = getURLQueryParamInt(r, "subsize")
 	if !ok {
-		request.Subsize = 0
+		request.Subsize = 1
+		request.SubsizeSet = false
+	}
+	if request.Subsize < 1 {
+		log.Println("Subsize Invalid. Ignoring")
+		request.Subsize = 1
 		request.SubsizeSet = false
 	}
 	request.CxmodeSet = true

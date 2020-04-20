@@ -22,7 +22,7 @@ import (
 
 
 
-func FSHandler(t *testing.T,locationName string) []byte{
+func FSHandler(t *testing.T,locationName string,expectedReturnCode int) []byte{
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
     // Create a request to pass to our handler. 
 	
@@ -40,8 +40,8 @@ func FSHandler(t *testing.T,locationName string) []byte{
 	headerServer := &routerServer{}
 	headerServer.ServeHTTP(rr,req)
 
-	if (rr.Code != http.StatusOK) {
-		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, expectedReturnCode)
 	}
 	return rr.Body.Bytes()
 }
@@ -70,27 +70,32 @@ func TestBaddModeHandler(t *testing.T) {
 
 func TestDirectoryHandler(t *testing.T) {
 	locationName := "TestDir/"
-	_ = FSHandler(t,locationName)
+	_ = FSHandler(t,locationName,200)
 }
 
 func TestDirectoryHandler2(t *testing.T) {
 	locationName := "TestDir"
-	_ = FSHandler(t,locationName)
+	_ = FSHandler(t,locationName,200)
 }
 
 func TestDirectoryHandler3(t *testing.T) {
 	locationName := "ServiceDir/tests/"
-	_ = FSHandler(t,locationName)
+	_ = FSHandler(t,locationName,200)
 }
 
 func TestDirectoryHandler4(t *testing.T) {
 	locationName := "ServiceDir/tests"
-	_ = FSHandler(t,locationName)
+	_ = FSHandler(t,locationName,200)
+}
+
+func TestDirectoryHandlerBad(t *testing.T) {
+	locationName := "ServiceDir/bad"
+	_ = FSHandler(t,locationName,400)
 }
 
 func TestFileHandler(t *testing.T) {
 	locationName := "TestDir/mydata_SB_60_60.tmp"
-	returnData := FSHandler(t,locationName)
+	returnData := FSHandler(t,locationName,200)
 	if len(returnData) !=(60*60)+512 {
 		t.Errorf("File URL Mode failed. Expecting %v bytes got %v", (60*60)+512, len(returnData))
 	}
@@ -98,7 +103,7 @@ func TestFileHandler(t *testing.T) {
 
 func TestLocationListHandler(t *testing.T) {
 	locationName := ""
-	returnData := FSHandler(t,locationName)
+	returnData := FSHandler(t,locationName,200)
 	var locationDetails []Location
 	marshalError := json.Unmarshal(returnData, &locationDetails)
 	if marshalError != nil {
@@ -111,10 +116,9 @@ func TestLocationListHandler(t *testing.T) {
 	}
 }
 
-func HDRHandler(t *testing.T,locationName string) {
+func HDRHandler(t *testing.T,locationName,filename string,expectedReturnCode int) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
     // Create a request to pass to our handler. 
-	filename := "mydata_SB_60_60.tmp"
 	sdsurl := "/sds/hdr/" + locationName +"/" +filename 
 	//t.Log("url", sdsurl)
 	req, err := http.NewRequest("GET", sdsurl, nil)
@@ -130,8 +134,11 @@ func HDRHandler(t *testing.T,locationName string) {
 	headerServer := &routerServer{}
 	headerServer.ServeHTTP(rr,req)
 
-	if (rr.Code != http.StatusOK) {
-		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, http.StatusOK)
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, expectedReturnCode)
+	}
+	if rr.Code == 400 {
+		return
 	}
 
 	var fileHeaderData BlueHeaderShortenedFields
@@ -149,8 +156,16 @@ func HDRHandler(t *testing.T,locationName string) {
 }
 
 func TestHDRHandlerTestDir(t *testing.T) {
-
-	HDRHandler(t,"TestDir")
+	filename := "mydata_SB_60_60.tmp"
+	HDRHandler(t,"TestDir",filename,200)
+}
+func TestHDRHandlerBad(t *testing.T) {
+	filename := "mydata_SB_60_60.tmp"
+	HDRHandler(t,"bad",filename,400)
+}
+func TestHDRHandlerBadFileType(t *testing.T) {
+	filename := "sdsTestConfig.json"
+	HDRHandler(t,"TestDir",filename,400)
 }
 
 func RDSTileHandler(t *testing.T,filename string,tileXsize,tileYsize,decX,decY,tileX,tileY int,outfmt string, expectedReturnCode int,expectedReturn []byte) {
@@ -195,6 +210,8 @@ func TestInvalidTileRequest(t *testing.T) {
 	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,11,1,0,0,"SB",400,expectedReturn)
 	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,8,0,"SB",400,expectedReturn)
 	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,0,8,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,-1,0,"SB",400,expectedReturn)
+	RDSTileHandler(t,"mydata_SB_600_600.tmp",100,100,1,1,0,-1,"SB",400,expectedReturn)
 }
 
 func TestFirstTile(t *testing.T) {
@@ -277,6 +294,49 @@ func BaseicRDSHandler(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysiz
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1)+"/"+strconv.Itoa(y1)+"/"+strconv.Itoa(x2)+"/"+strconv.Itoa(y2)+"/"+strconv.Itoa(outxsize)+"/"+strconv.Itoa(outysize)+"/"+locationName+"/"+filename
 	sdsurl = sdsurl+"?transform=" + transform + "&cxmode=" + cxmode +"&outfmt=" +outfmt
+
+	t.Log("url:", sdsurl)
+	req, err := http.NewRequest("GET", sdsurl, nil)
+	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
+    if err != nil {
+        t.Fatal(err)
+	}
+
+	setupConfigLogCache()
+
+	rr := httptest.NewRecorder()
+	//handler := http.HandlerFunc(fileHeaderServer)
+	rdsServer := &routerServer{}
+	rdsServer.ServeHTTP(rr,req)
+
+	if (rr.Code != expectedReturnCode) {
+		t.Errorf("handler returned wrong status code: got %v want %v",rr.Code, expectedReturnCode)
+	}
+
+	if len(rr.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v epected %v ",len(rr.Body.Bytes()), len(expectedReturn))
+	}
+
+	var testFail bool = false
+	for i:=0; i<len(rr.Body.Bytes()); i++ {
+		if rr.Body.Bytes()[i] != expectedReturn[i] {
+			testFail = true
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v",i, rr.Body.Bytes()[i] , expectedReturn[i])
+		}
+	}
+
+	if testFail {
+		t.Errorf("Values did not match expected data")
+	}
+
+
+}
+
+func BaseicRDSHandlerSubsize(t *testing.T,filename string, x1,y1,x2,y2,outxsize,outysize,subsize int, transform, cxmode,outfmt string, expectedReturnCode int,expectedReturn []byte) {
+	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	locationName := "TestDir"
+	sdsurl := "/sds/rds/" + strconv.Itoa(x1)+"/"+strconv.Itoa(y1)+"/"+strconv.Itoa(x2)+"/"+strconv.Itoa(y2)+"/"+strconv.Itoa(outxsize)+"/"+strconv.Itoa(outysize)+"/"+locationName+"/"+filename
+	sdsurl = sdsurl+"?transform=" + transform + "&cxmode=" + cxmode +"&outfmt=" +outfmt+"&subsize=" + strconv.Itoa(subsize)
 
 	t.Log("url:", sdsurl)
 	req, err := http.NewRequest("GET", sdsurl, nil)
@@ -398,6 +458,8 @@ func TestInvalidOutfmt(t *testing.T) {
 	expectedReturn2 := make([]byte,1)
 	expectedReturn2[0] = 10 
 	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,1,1,"first","Re","SB",200,expectedReturn2)
+	//Test again with X1 and X2 in reverse order. Should still work. 
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",60,59,59,60,1,1,"first","Re","SB",200,expectedReturn2)
 }
 
 func TestInvalidXYParams(t *testing.T) {
@@ -409,6 +471,16 @@ func TestInvalidXYParams(t *testing.T) {
 	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,61,1,1,"first","Re","SB",400,expectedReturn)
 	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,0,60,61,1,1,"first","Re","SB",400,expectedReturn)
 	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,-1,60,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,-1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,60,1,-1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",60,59,60,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,60,60,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,-1,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,-1,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,70,60,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",59,59,60,70,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",70,60,59,59,1,1,"first","Re","SB",400,expectedReturn)
+	BaseicRDSHandler(t,"mydata_CF_60_60.tmp",60,70,59,59,1,1,"first","Re","SB",400,expectedReturn)
 }
 
 
@@ -749,4 +821,32 @@ func TestFourPointsSP(t *testing.T) {
 	expectedReturn[2] = 1
 	expectedReturn[3] = 1
 	BaseicRDSHandler(t,"mydata_SP_80_80.tmp",1,0,4,1,4,1,"first","Re", "SB",200,expectedReturn)
+}
+
+func TestFirstPointSubsize(t *testing.T) {
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 0 
+	BaseicRDSHandlerSubsize(t,"mydata_SB_60_60.tmp",0,0,1,1,1,1,60,"first","Re", "SB",200,expectedReturn)
+}
+
+func TestFirstPointSubsize2(t *testing.T) {
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 0 
+	BaseicRDSHandlerSubsize(t,"mydata_SB_60_60.tmp",0,0,30,20,1,1,30,"mean","Re", "SB",200,expectedReturn)
+}
+
+func TestFirstPointSubsize3(t *testing.T) {
+	expectedReturn := make([]byte,1)
+	expectedReturn[0] = 5 
+	BaseicRDSHandlerSubsize(t,"mydata_SB_60_60.tmp",0,20,30,22,1,1,30,"mean","Re", "SB",200,expectedReturn)
+}
+func TestAverageMiddlePointsBadSubsize(t *testing.T) { //Badsubsize should be ignored and result should be the same as if it was not specified. 
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = 1 //Input Data is values of 0,1,2 in equal amounts, averaged together be 1 
+	BaseicRDSHandlerSubsize(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,0,"mean","Re","SB",200,expectedReturn)
+}
+func TestAverageMiddlePointsBadSubsize2(t *testing.T) { //Badsubsize should be ignored and result should be the same as if it was not specified. 
+	expectedReturn := make([]byte,1) 
+	expectedReturn[0] = 1 //Input Data is values of 0,1,2 in equal amounts, averaged together be 1 
+	BaseicRDSHandlerSubsize(t,"mydata_SB_60_60.tmp",0,20,18,21,1,1,-1,"mean","Re","SB",200,expectedReturn)
 }
