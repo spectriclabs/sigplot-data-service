@@ -1,10 +1,11 @@
 <SigPlotMimic as |mimicGroup|>
 <div class="container-fluid fill">
     <div class="row">
-        <div class="col-md" style="min-height: 400px; margin: 10px;">
+        <div class="col-md" style="min-height: 400px; max-height: 400px; margin: 10px;">
+            <dt class="col-sm-3">Choose Location:</dt>
             <ul class="list-group scrollable" style="max-height: 400px; margin: 10px;">
-                {{#each @model.files as |file|}}
-                <button type="button" class="list-group-item list-group-item-action" {{on "click" (fn this.plotFile file) }}>{{file}}</button>
+                {{#each @model.locations as |location|}}
+                <button type="button" class="list-group-item list-group-item-action" {{on "click" (fn this.setLocation location) }}>{{location}}</button>
                 {{/each}}
             </ul>
         </div>
@@ -15,15 +16,13 @@
         </div>
     </div>
     <div class="row">
-        <div class="col-md" style="min-height: 400px; max-height: 400px; margin: 10px;">
-            <dl class="row">
-                <dt class="col-sm-3">Raw Plot URL</dt>
-                <dd class="col-sm-9">{{this.rawHref}}</dd>
-            </dl>
-            <dl class="row">
-                <dt class="col-sm-3">SDS Plot URL</dt>
-                <dd class="col-sm-9">{{this.sdsHref}}</dd>
-            </dl>
+        <div class="col-md" style="min-height: 400px; margin: 10px;">
+            <dt class="col-sm-3">Choose File:</dt>
+            <ul class="list-group scrollable" style="max-height: 400px; margin: 10px;">
+                {{#each this.files as |file|}}
+                <button type="button" class="list-group-item list-group-item-action" {{on "click" (fn this.plotFile file) }}>{{file}}</button>
+                {{/each}}
+            </ul>
         </div>
         <div class="col-md" style="margin: 10px;">
             <SigPlot id="plot_sds" style="width: 100%; height: 100%;" @options={{hash cmode=6}} @mimic={{mimicGroup.bidir}} as |plot|>

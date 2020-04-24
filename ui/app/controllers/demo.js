@@ -9,6 +9,8 @@ export default class DemoController extends Controller {
 
     @tracked sdsHref = null;
     @tracked rawHref = null;
+    @tracked location = null;
+    @tracked files = null;
 
     init() {
         super.init(...arguments);
@@ -16,8 +18,13 @@ export default class DemoController extends Controller {
 
     @action
     plotFile(file) {
-        this.sdsHref = this.sds.getFileUrl(file,"hdr");
-        this.rawHref = this.sds.getFileUrl(file, "fs");
+        this.sdsHref = this.sds.getFileUrl(file,"hdr",this.location);
+        this.rawHref = this.sds.getFileUrl(file, "fs",this.location);
+    }
+    @action
+    async setLocation(location) {
+        this.location = location;
+        this.files = await this.sds.getFiles(this.location);
     }
 
 }

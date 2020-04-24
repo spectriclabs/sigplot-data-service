@@ -1,15 +1,20 @@
 import Route from '@ember/routing/route';
 import { task, timeout } from 'ember-concurrency';
 import { inject as service } from '@ember/service';
+import { tracked } from '@glimmer/tracking';
 
 export default class DemoRoute extends Route {
     @service sds;
     @service notify;
 
+    @tracked sdslocation = "sdsdata";
+    //sdslocation = "sdsdata";
+
     async model() {
-        const files = await this.sds.getFiles();
+        
+      const locations = await this.sds.getLocations();
         //this.notify.info(`loaded ${files.length} files`);
-        return { files  };
+      return { locations  };
     }
 
     setupController() {
