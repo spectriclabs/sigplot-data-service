@@ -1,6 +1,22 @@
 
 @import "ember-bootstrap/bootstrap";
 
+body {
+    background-image: url('/ui/assets/images/SpectricBackground.jpg');
+    background-size: cover;
+    color:white;
+    background-color:transparent
+}
+
+.list-group-item {
+    background-color:#D3D3D3;
+    color:black;
+}
+
+.list-group {
+    background-color:#D3D3D3;
+}
+
 .scrollable {
     margin-bottom: 10px;
     overflow: scroll;
@@ -10,7 +26,36 @@
 .fill {
     min-height: 100%;
 }
+.fillwidth {
+    width: 100%
+}
 
 html,body {
     height: 100%;
 }
+
+.file {
+}
+
+.directory::before {
+    content: '\1F5C0'
+}
+
+.directory {
+    font-weight: bold;
+}
+
+.button3{
+    display:inline-block;
+    padding:0.3em 1.2em;
+    margin:0 0.3em 0.3em 0;
+    border-radius:20%;
+    box-sizing: border-box;
+    text-decoration:none;
+    font-family:'Roboto',sans-serif;
+    font-weight:300;
+    color:#FFFFFF;
+    background-color:  	#808080;
+    text-align:center;
+    transition: all 0.2s;
+    }

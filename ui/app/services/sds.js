@@ -12,8 +12,8 @@ export default class SdsService extends Service {
         try {
             const response = await fetch(this.url+ "/fs/"+location+"/");
             if (response.ok) {
-                const files = await response.json();
-                return files;
+                const fileInfo = await response.json();
+                return fileInfo
             } else {
                 return { files: [] };
             }
@@ -32,7 +32,6 @@ export default class SdsService extends Service {
                 for (var locationNum=0;locationNum<locationInfo.length;locationNum++) {
                     locations.push(locationInfo[locationNum].locationName)
                 }
-                //const locations = ["sdsdata", "ServiceDir"]
                 return locations;
             } else {
                 return { locations: [] };

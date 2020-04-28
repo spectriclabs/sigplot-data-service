@@ -13,7 +13,6 @@ export default class DemoRoute extends Route {
     async model() {
         
       const locations = await this.sds.getLocations();
-        //this.notify.info(`loaded ${files.length} files`);
       return { locations  };
     }
 
