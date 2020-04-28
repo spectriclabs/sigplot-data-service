@@ -1429,21 +1429,22 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		return
 	}
-	type fileList struct {
-		filenames   []string`json:"filenames"`
+	type fileObj struct {
+		Filename  	string`json:"filename"`
+		Type   		string`json:"type"`
 	}
-	var filelist fileList
-	filenames := make([]string,len(files))
+	filelist := make([]fileObj,len(files))
 	i:=0
 	for _, file := range files {
-		if !(file.IsDir()) {
-			filenames[i]=file.Name()
-			i++
+		filelist[i].Filename = file.Name()
+		if (file.IsDir()) {
+			filelist[i].Type="directory"
+		} else {
+			filelist[i].Type="file"
 		}
+		i++
 	}
-
-	filelist.filenames = filenames
-	returnbytes, marshalError := json.Marshal(filenames)
+	returnbytes, marshalError := json.Marshal(filelist)
 	if marshalError != nil {
 		log.Println("Problem Marshalling Header to JSON ", marshalError)
 		w.WriteHeader(400)

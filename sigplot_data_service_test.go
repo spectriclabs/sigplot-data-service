@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"os"
 	"math"
+	"io/ioutil"
 //	"log"
 //	"fmt"
 )
@@ -68,24 +69,63 @@ func TestBaddModeHandler(t *testing.T) {
 	}
 }
 
+type fileObj struct {
+	Filename  	string`json:"filename"`
+	Type   		string`json:"type"`
+}
+
+func checkfiles(t *testing.T,returnBytes  []byte) {
+	var fileDetails []fileObj
+	marshalError := json.Unmarshal(returnBytes, &fileDetails)
+	if marshalError != nil {
+		t.Errorf("File List Returned did not unmarshal to the correct type")
+	}
+	files, err := ioutil.ReadDir("./tests")
+	if err != nil {
+		t.Errorf("Error Reading Testing directory")
+	}
+	var found bool
+	for _, osfile := range files {
+		found = false
+		for _, jsonfile := range fileDetails {
+			//log.Println("Looking for:",osfile.Name(), "found:", jsonfile.Filename )
+			if osfile.Name() == jsonfile.Filename {
+				found = true
+				if (osfile.IsDir() || jsonfile.Type=="directory") && !(osfile.IsDir() && jsonfile.Type=="directory") {
+					t.Errorf("File Type not correct. For file %v",osfile.Name() )
+				}
+			}
+		}
+		if !found {
+			t.Errorf("File %v not found in return data",osfile.Name() )
+		}
+		
+	}
+}
+
 func TestDirectoryHandler(t *testing.T) {
 	locationName := "TestDir/"
-	_ = FSHandler(t,locationName,200)
+	returnData := FSHandler(t,locationName,200)
+	checkfiles(t, returnData)
+
 }
 
 func TestDirectoryHandler2(t *testing.T) {
 	locationName := "TestDir"
-	_ = FSHandler(t,locationName,200)
+	returnData := FSHandler(t,locationName,200)
+	checkfiles(t, returnData)
 }
 
 func TestDirectoryHandler3(t *testing.T) {
 	locationName := "ServiceDir/tests/"
-	_ = FSHandler(t,locationName,200)
+	returnData := FSHandler(t,locationName,200)
+	checkfiles(t, returnData)
 }
 
 func TestDirectoryHandler4(t *testing.T) {
 	locationName := "ServiceDir/tests"
-	_ = FSHandler(t,locationName,200)
+	returnData := FSHandler(t,locationName,200)
+	checkfiles(t, returnData)
 }
 
 func TestDirectoryHandlerBad(t *testing.T) {
