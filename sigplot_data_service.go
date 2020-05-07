@@ -36,11 +36,11 @@ var stubHTML = "" // set to HTML by stub_asset if the ui build isn't included
 var configuration Configuration
 
 func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64, colorMap string) []byte {
-	for i := 0; i < len(dataIn); i++ {
-		if math.IsNaN(dataIn[i]) {
-			log.Println("createOutput NaN", i)
-		}
-	}
+	// for i := 0; i < len(dataIn); i++ {
+	// 	if math.IsNaN(dataIn[i]) {
+	// 		log.Println("createOutput NaN", i)
+	// 	}
+	// }
 
 	dataOut := new(bytes.Buffer)
 	var numColors int = 1000
@@ -553,29 +553,29 @@ func processRequest(dataRequest rdsRequest) []byte {
 			<-done
 		}
 
-		for i := 0; i < len(xThinData); i++ {
-			if math.IsNaN(xThinData[i]) {
-				log.Println("processedDataNaN", outputLine, i)
-			}
-		}
+		// for i := 0; i < len(xThinData); i++ {
+		// 	if math.IsNaN(xThinData[i]) {
+		// 		log.Println("processedDataNaN", outputLine, i)
+		// 	}
+		// }
 		// Thin in y direction the subsset of lines that have now been processed in x
 		yThinData := downSampleLineInY(xThinData, dataRequest.Outxsize, dataRequest.Transform)
 		//log.Println("Thin Y data is currently ", len(yThinData))
 
-		for i := 0; i < len(yThinData); i++ {
-			if math.IsNaN(yThinData[i]) {
-				log.Println("processedDataNaN", outputLine, i)
-			}
-		}
+		// for i := 0; i < len(yThinData); i++ {
+		// 	if math.IsNaN(yThinData[i]) {
+		// 		log.Println("processedDataNaN", outputLine, i)
+		// 	}
+		// }
 
 		processedData = append(processedData, yThinData...)
 		//log.Println("processedData is currently ", len(processedData))
 
-		for i := 0; i < len(processedData); i++ {
-			if math.IsNaN(processedData[i]) {
-				log.Println("processedDataNaN", outputLine, i)
-			}
-		}
+		// for i := 0; i < len(processedData); i++ {
+		// 	if math.IsNaN(processedData[i]) {
+		// 		log.Println("processedDataNaN", outputLine, i)
+		// 	}
+		// }
 
 	}
 
