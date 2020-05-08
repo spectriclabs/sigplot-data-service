@@ -19,7 +19,8 @@ import (
 	"gonum.org/v1/gonum/stat"
 	assetfs "github.com/elazarl/go-bindata-assetfs"
 
-	//	"runtime/pprof"
+//	"runtime/pprof"
+//	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -1554,11 +1555,46 @@ func main() {
 	// 	pprof.StartCPUProfile(f)
 	// 	defer pprof.StopCPUProfile()
 	// }
-	// start := time.Now()
-	// data:=processRequest("mydata_SI_8192_20000" ,"SI",0,8192,0,0,8192,20000,300,700,"mean","RGBA",-20000,8192,true,"RampColormap")
-	// elapsed := time.Since(start)
-	// log.Println("Length of Output Data " ,len(data), " processed in: ", elapsed)
 
+	// start := time.Now()
+
+	// tileXsize := 500
+	// tileYsize := 500
+	// decX := 3
+	// decY := 3
+	// tileX := 0
+	// tileY := 0 
+	// locationName := "TestData"
+	// filename := "mydata_SI_8192_20000.tmp"
+	// outfmt:= "RGBA"
+	// sdsurl := "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
+
+	// req, _ := http.NewRequest("GET", sdsurl, nil)
+	// rr := httptest.NewRecorder()
+	// rdsServer := &routerServer{}
+	// rdsServer.ServeHTTP(rr,req)
+
+	// tileX =1
+	// tileY = 0 
+	// sdsurl = "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
+	// req, _ = http.NewRequest("GET", sdsurl, nil)
+	// rdsServer.ServeHTTP(rr,req)
+
+	// tileX =0
+	// tileY = 1
+	// sdsurl = "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
+	// req, _ = http.NewRequest("GET", sdsurl, nil)
+	// rdsServer.ServeHTTP(rr,req)
+
+	// tileX =1
+	// tileY = 1
+	// sdsurl = "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
+	// req, _ = http.NewRequest("GET", sdsurl, nil)
+	// rdsServer.ServeHTTP(rr,req)
+
+	// log.Println("Computation Completed. Returned Code",rr.Code , "and bytes", len(rr.Body.Bytes()))
+	// elapsed := time.Since(start)
+	// log.Println("Total run time: ", elapsed)
 
 	// Serve up service on /sds
 	log.Println("UI Enabled: ", uiEnabled)
