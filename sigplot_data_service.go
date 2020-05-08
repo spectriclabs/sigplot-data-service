@@ -599,12 +599,14 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 			currentLocation = configuration.LocationDetails[i]
 		}
 	}
-
-	switch currentLocation.LocationType {
-	case "localFile":
+	if len(currentLocation.Path) >0 {
 		if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
 			currentLocation.Path += "/"
 		}
+	}
+	switch currentLocation.LocationType {
+	case "localFile":
+
 		fullFilepath := fmt.Sprintf("%s%s%s", currentLocation.Path, urlPath, fileName)
 		log.Println("Reading Local File. LocationName=", locationName, "fileName=", fileName, "fullPath=", fullFilepath)
 		file, err := os.Open(fullFilepath)
@@ -617,7 +619,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 	case "minio":
 		start := time.Now()
 		fullFilepath := fmt.Sprintf("%s%s%s", currentLocation.Path, urlPath, fileName)
-		cacheFileName := fmt.Sprintf("%s%s%s", currentLocation.MinioBucket, fullFilepath, "x1y1x2y2outxsizeoutysize")
+		cacheFileName := urlToCacheFileName("sds",currentLocation.MinioBucket+fullFilepath)
 		file, inCache := getItemFromCache(cacheFileName, "miniocache/")
 		if !inCache {
 			log.Println("Minio File not in local file Cache, Need to fetch")
@@ -636,7 +638,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 			fileData := make([]byte, fi.Size)
 			//var readerr error
 			numRead, readerr := object.Read(fileData)
-			if int64(numRead) != fi.Size {
+			if int64(numRead) != fi.Size || !(readerr == nil || readerr ==io.EOF) {
 				log.Println("Error Reading File from from Minio", readerr)
 				log.Println("Expected Bytes: ", fi.Size, "Got Bytes", numRead)
 				return nil, "", false

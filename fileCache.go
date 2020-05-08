@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"path/filepath"
 )
 
 func createDirectory(path string) bool {
@@ -30,7 +31,7 @@ func createDirectory(path string) bool {
 		return false
 	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		os.Mkdir(path, 0700)
+		os.Mkdir(path, 0755)
 		log.Println("Created Directory ", path)
 		return true
 	}
@@ -74,9 +75,9 @@ func getItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool)
 func putItemInCache(cacheFileName string, subDir string, data []byte) {
 
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
-	fullPathDirectory := fmt.Sprintf("%s%s", configuration.CacheLocation, subDir)
+	fullPathDirectory := filepath.Dir(fullPath)
 	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
-		os.Mkdir(fullPathDirectory, 0700)
+		os.Mkdir(fullPathDirectory, 0755)
 	}
 	file, err := os.Create(fullPath)
 	if err != nil {
