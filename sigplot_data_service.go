@@ -7,20 +7,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math"
 	"net/http"
 	"os"
-	"io/ioutil"
 
+	assetfs "github.com/elazarl/go-bindata-assetfs"
 	"github.com/minio/minio-go/v6"
 	"github.com/tkanos/gonfig"
 	"gonum.org/v1/gonum/floats"
 	"gonum.org/v1/gonum/stat"
-	assetfs "github.com/elazarl/go-bindata-assetfs"
 
-//	"runtime/pprof"
-//	"net/http/httptest"
+	//	"runtime/pprof"
+	//	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,12 +28,11 @@ import (
 	"unsafe"
 )
 
-
 var ioMutex = &sync.Mutex{}
-var zminmaxMutex  = &sync.Mutex{}
-var zminmaxtileMutex  = &sync.Mutex{}
+var zminmaxMutex = &sync.Mutex{}
+var zminmaxtileMutex = &sync.Mutex{}
 var uiEnabled = true // set to false by stub_asset if the ui build isn't included
-var stubHTML = "" // set to HTML by stub_asset if the ui build isn't included
+var stubHTML = ""    // set to HTML by stub_asset if the ui build isn't included
 var configuration Configuration
 
 func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64, colorMap string) []byte {
@@ -52,7 +51,7 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 		if zmax != zmin {
 			colorsPerSpan := (zmax - zmin) / float64(numColors)
 			for i := 0; i < len(dataIn); i++ {
-				colorIndex := math.Round((dataIn[i] - zmin) / colorsPerSpan)-1
+				colorIndex := math.Round((dataIn[i]-zmin)/colorsPerSpan) - 1
 				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
 				a := 255
 				//log.Println("colorIndex", colorIndex,dataIn[i],zmin,zmax,colorsPerSpan)
@@ -124,25 +123,25 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 
 			check(err)
-		
+
 		case "P":
 			extraBits := len(dataIn) % 8
-			for extraBit:=0; extraBit<extraBits; extraBits++{ //Pad zeros to make the number of elements divisable by 8 so it can be packed into a byte
-				dataIn = append(dataIn,0)
+			for extraBit := 0; extraBit < extraBits; extraBits++ { //Pad zeros to make the number of elements divisable by 8 so it can be packed into a byte
+				dataIn = append(dataIn, 0)
 			}
-			numBytes := len(dataIn)/8
-			var numSlice = make([]uint8,numBytes)
+			numBytes := len(dataIn) / 8
+			var numSlice = make([]uint8, numBytes)
 			for i := 0; i < len(numSlice); i++ {
-				for j:=0; j<8; j++ {
+				for j := 0; j < 8; j++ {
 					var bit uint8
-					if dataIn[i*8+j] >0 { //SP Data can only be 0 or 1, so if values is greater than 0, make it a 1. 
-						bit =1
+					if dataIn[i*8+j] > 0 { //SP Data can only be 0 or 1, so if values is greater than 0, make it a 1.
+						bit = 1
 					} else {
 						bit = 0
 					}
 					numSlice[i] = (numSlice[i] << 1) | bit
 				}
-				
+
 			}
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)
 			check(err)
@@ -156,8 +155,6 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 	}
 
 }
-
-
 
 func convertFileData(bytesin []byte, file_formatstring string) []float64 {
 	var bytes_per_atom int = int(bytesPerAtomMap[string(file_formatstring[1])])
@@ -243,8 +240,8 @@ func doTransform(dataIn []float64, transform string) float64 {
 		}
 		return num
 	case "maxabs":
-		absnums := make([]float64,len(dataIn))
-		for i:=0; i<len(dataIn); i++ {
+		absnums := make([]float64, len(dataIn))
+		for i := 0; i < len(dataIn); i++ {
 			absnums[i] = math.Abs(dataIn[i])
 		}
 		num := floats.Max(absnums[:])
@@ -260,7 +257,7 @@ func doTransform(dataIn []float64, transform string) float64 {
 			num = 0
 		}
 		return num
-	default: //Default to first if bad value. 
+	default: //Default to first if bad value.
 		log.Println("Unknown transform", transform, "using first")
 		num := dataIn[0]
 		if math.IsNaN(num) {
@@ -304,14 +301,14 @@ func down_sample_line_inx(datain []float64, outxsize int, transform string, outD
 	var xelementsperoutput float64
 	xelementsperoutput = float64(len(datain)) / float64(outxsize)
 	//var thinxdata = make([]float64,outxsize)
-	if xelementsperoutput > 1 { // Expansion 
+	if xelementsperoutput > 1 { // Expansion
 		for x := 0; x < outxsize; x++ {
 			var startelement int
 			var endelement int
 			if x != (outxsize - 1) { // Not last element
 				startelement = int(math.Round(float64(x) * xelementsperoutput))
 				endelement = int(math.Round(float64(x+1) * xelementsperoutput))
-			} else { // Last element, work backwards 
+			} else { // Last element, work backwards
 				endelement = len(datain)
 				startelement = endelement - int(math.Ceil(xelementsperoutput))
 			}
@@ -378,12 +375,11 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 
-
 	loThresh := 1.0e-20
 	if complexData {
 		outData := make([]float64, len(datain)/2)
 		for i := 0; i < len(datain)-1; i += 2 {
-			
+
 			switch cxmode {
 			case "Ma":
 				outData[i/2] = math.Sqrt(datain[i]*datain[i] + datain[i+1]*datain[i+1])
@@ -404,7 +400,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 				mag2 = math.Max(mag2, loThresh)
 				outData[i/2] = 20 * math.Log10(mag2)
 			default: //Defaults to "real"
-				log.Println("Unkown cxmode" , cxmode, "defaulting to Re")
+				log.Println("Unkown cxmode", cxmode, "defaulting to Re")
 				outData[i/2] = datain[i]
 			}
 
@@ -416,7 +412,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Ma":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				outData[i] = math.Sqrt(datain[i]*datain[i]*2)
+				outData[i] = math.Sqrt(datain[i] * datain[i] * 2)
 			}
 			return outData
 		case "Ph":
@@ -435,7 +431,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Lo":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := 2*datain[i] * datain[i]
+				mag2 := 2 * datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 10 * math.Log10(mag2)
 			}
@@ -443,7 +439,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "L2":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := 2*datain[i] * datain[i]
+				mag2 := 2 * datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 20 * math.Log10(mag2)
 			}
@@ -470,7 +466,6 @@ func processline(outData []float64, outLineNum int, done chan bool, dataRequest 
 	bytesLengthInt := int(math.Ceil(bytesLength))
 	filedata, _ := getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
 	dataToProcess := convertFileData(filedata, dataRequest.FileFormat)
-	
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
 	if bytesPerAtom < 1 {
@@ -495,7 +490,6 @@ func processline(outData []float64, outLineNum int, done chan bool, dataRequest 
 
 	}
 
-
 	down_sample_line_inx(realData, dataRequest.Outxsize, dataRequest.Transform, outData, outLineNum)
 	done <- true
 }
@@ -505,25 +499,25 @@ func processRequest(dataRequest rdsRequest) []byte {
 
 	var yLinesPerOutput float64 = float64(dataRequest.Ysize) / float64(dataRequest.Outysize)
 	var yLinesPerOutputCeil int = int(math.Ceil(yLinesPerOutput))
-	log.Println("processRequest:", dataRequest.FileXSize , dataRequest.Xstart , dataRequest.Ystart , dataRequest.Xsize , dataRequest.Ysize , dataRequest.Outxsize , dataRequest.Outysize )
+	log.Println("processRequest:", dataRequest.FileXSize, dataRequest.Xstart, dataRequest.Ystart, dataRequest.Xsize, dataRequest.Ysize, dataRequest.Outxsize, dataRequest.Outysize)
 	// Loop over the output Y Lines
 	for outputLine := 0; outputLine < dataRequest.Outysize; outputLine++ {
 		//log.Println("Processing Output Line ", outputLine)
 		// For Each Output Y line Read and process the required lines from the input file
 		var startLine int
 		var endLine int
-		if yLinesPerOutput > 1 { // Y Compression is needed. 
-			if outputLine!=dataRequest.Outysize-1 { //Not the last output line of file
+		if yLinesPerOutput > 1 { // Y Compression is needed.
+			if outputLine != dataRequest.Outysize-1 { //Not the last output line of file
 				startLine = dataRequest.Ystart + int(math.Round(float64(outputLine)*yLinesPerOutput))
 				endLine = dataRequest.Ystart + int(math.Round(float64(outputLine+1)*yLinesPerOutput))
-			} else { // Last outputline, work backwards from last line. 
+			} else { // Last outputline, work backwards from last line.
 				endLine = dataRequest.Ystart + dataRequest.Ysize
 				startLine = endLine - yLinesPerOutputCeil
 			}
-		} else { // Y expansion 
+		} else { // Y expansion
 			startLine = dataRequest.Ystart + int(math.Round(float64(outputLine)*yLinesPerOutput))
-			endLine = startLine+ 1
-			if endLine > (dataRequest.Ystart+dataRequest.Ysize - 1) { // Last outputlines, work backwards from last line. 
+			endLine = startLine + 1
+			if endLine > (dataRequest.Ystart + dataRequest.Ysize - 1) { // Last outputlines, work backwards from last line.
 				endLine = dataRequest.Ystart + dataRequest.Ysize
 				startLine = endLine - 1
 			}
@@ -545,7 +539,7 @@ func processRequest(dataRequest rdsRequest) []byte {
 		for inputLine := startLine; inputLine < endLine; inputLine++ {
 			var lineRequest rdsRequest
 			lineRequest = dataRequest
-			lineRequest.Ystart=inputLine
+			lineRequest.Ystart = inputLine
 			go processline(xThinData, inputLine-startLine, done, lineRequest)
 
 		}
@@ -584,12 +578,106 @@ func processRequest(dataRequest rdsRequest) []byte {
 	return outData
 }
 
-func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
+func processLineRequest(dataRequest rdsRequest, cutType string) []byte {
+	bytesPerAtom, complexFlag := getFileTypeInfo(dataRequest.FileFormat)
+
+	bytesPerElement := bytesPerAtom
+	if complexFlag {
+		bytesPerElement = bytesPerElement * 2
+	}
+
+	// Get the slice data out of the file. For x the data is continuous, for y cuts, we need to grab one element from each row.
+	filedata := make([]byte, 0, int(math.Max(float64(dataRequest.FileXSize), float64(dataRequest.FileYSize))))
+	var dataToProcess []float64
+	if cutType == "rdsxcut" || cutType == "lds" {
+		firstDataByte := float64(dataRequest.Ystart*dataRequest.FileXSize+dataRequest.Xstart) * bytesPerElement
+		firstByteInt := int(math.Floor(firstDataByte))
+		bytesLength := float64(dataRequest.Xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
+		bytesLengthInt := int(math.Ceil(bytesLength))
+		filedata, _ = getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
+		dataToProcess = convertFileData(filedata, dataRequest.FileFormat)
+		//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
+		if bytesPerAtom < 1 {
+			dataStartBit := int(math.Mod(firstDataByte, 1) * 8)
+			dataEndBit := int(math.Mod(bytesLength, 1) * 8)
+			var extraBits int = 0
+			if dataEndBit > 0 {
+				extraBits = 8 - dataEndBit
+			}
+			dataToProcess = dataToProcess[dataStartBit : len(dataToProcess)-extraBits]
+		}
+
+	} else if cutType == "rdsycut" {
+		log.Println("Getting data from file for y cut")
+		if bytesPerAtom < 1 {
+			log.Println("Don't support y cut for SP data")
+			var empty []byte
+			return empty
+		}
+		for row := dataRequest.Ystart; row < (dataRequest.Ystart + dataRequest.Ysize); row++ {
+			dataByte := float64(row*dataRequest.FileXSize+dataRequest.Xstart) * bytesPerElement
+			dataByteInt := int(math.Floor(dataByte))
+			data, _ := getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+dataByteInt, int(bytesPerElement))
+			filedata = append(filedata, data...)
+		}
+		dataToProcess = convertFileData(filedata, dataRequest.FileFormat)
+		log.Println("Got data from file for y cut", len(dataToProcess))
+
+	}
+
+	var realData []float64
+	if complexFlag {
+		realData = applyCXmode(dataToProcess, dataRequest.Cxmode, true)
+	} else {
+		if dataRequest.CxmodeSet {
+			realData = applyCXmode(dataToProcess, dataRequest.Cxmode, false)
+		} else {
+			realData = dataToProcess
+		}
+
+	}
+
+	//Output data will be x and z data of variable length up to Xsize. Allocation with size 0 but with a capacity. The x arrary will be used for both piece of data at the end.
+	xThinData := make([]int16, 0, len(realData)*2)
+	zThinData := make([]int16, 0, len(realData))
+
+	xratio := float64(len(realData)) / float64(dataRequest.Outxsize-1)
+	zratio := float64((dataRequest.Zmax - dataRequest.Zmin)) / float64(dataRequest.Outzsize-1)
+	for x := 0; x < len(realData); x++ {
+
+		xpixel := int16(math.Round(float64(x) / xratio))
+		zpixel := int16(math.Round((dataRequest.Zmax - float64(realData[x])) / zratio))
+
+		// If the thinned array does not already have a value in it then append this value.
+		if len(xThinData) >= 1 {
+			//If this value is not duplicate to the last then append it.
+			if !(xThinData[len(xThinData)-1] == xpixel && zThinData[len(zThinData)-1] == zpixel) {
+				//log.Println("Adding Pixel", xpixel, zpixel)
+				xThinData = append(xThinData, xpixel)
+				zThinData = append(zThinData, zpixel)
+			}
+
+		} else {
+			log.Println("Adding Pixel  1", xpixel, zpixel)
+			xThinData = append(xThinData, xpixel)
+			zThinData = append(zThinData, zpixel)
+		}
+
+	}
+	// Return the data as bytes with x values followed by z values.
+	xThinData = append(xThinData, zThinData...)
+	outData := new(bytes.Buffer)
+
+	_ = binary.Write(outData, binary.LittleEndian, &xThinData)
+	return outData.Bytes()
+}
+
+func openDataSource(url string, urlPosition int) (io.ReadSeeker, string, bool) {
 
 	pathData := strings.Split(url, "/")
 	locationName := pathData[urlPosition]
 	var urlPath string = ""
-	for i := urlPosition+1; i < len(pathData)-1; i++ {
+	for i := urlPosition + 1; i < len(pathData)-1; i++ {
 		urlPath = urlPath + pathData[i] + "/"
 	}
 
@@ -600,7 +688,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 			currentLocation = configuration.LocationDetails[i]
 		}
 	}
-	if len(currentLocation.Path) >0 {
+	if len(currentLocation.Path) > 0 {
 		if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
 			currentLocation.Path += "/"
 		}
@@ -620,7 +708,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 	case "minio":
 		start := time.Now()
 		fullFilepath := fmt.Sprintf("%s%s%s", currentLocation.Path, urlPath, fileName)
-		cacheFileName := urlToCacheFileName("sds",currentLocation.MinioBucket+fullFilepath)
+		cacheFileName := urlToCacheFileName("sds", currentLocation.MinioBucket+fullFilepath)
 		file, inCache := getItemFromCache(cacheFileName, "miniocache/")
 		if !inCache {
 			log.Println("Minio File not in local file Cache, Need to fetch")
@@ -639,7 +727,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 			fileData := make([]byte, fi.Size)
 			//var readerr error
 			numRead, readerr := object.Read(fileData)
-			if int64(numRead) != fi.Size || !(readerr == nil || readerr ==io.EOF) {
+			if int64(numRead) != fi.Size || !(readerr == nil || readerr == io.EOF) {
 				log.Println("Error Reading File from from Minio", readerr)
 				log.Println("Expected Bytes: ", fi.Size, "Got Bytes", numRead)
 				return nil, "", false
@@ -660,7 +748,7 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 		return reader, fileName, true
 
 	default:
-		log.Println("Unsupported Location Type", currentLocation.LocationName ,currentLocation.LocationType)
+		log.Println("Unsupported Location Type", currentLocation.LocationName, currentLocation.LocationType)
 		return nil, "", false
 	}
 
@@ -668,10 +756,10 @@ func openDataSource(url string,urlPosition int) (io.ReadSeeker, string, bool) {
 
 func (request *rdsRequest) getQueryParams(r *http.Request) {
 	var ok bool
-	// Get URL Query Params	
+	// Get URL Query Params
 	request.Transform, ok = getURLQueryParamString(r, "transform")
 	if !ok {
-		request.Transform ="first"
+		request.Transform = "first"
 	}
 	request.SubsizeSet = true
 	request.Subsize, ok = getURLQueryParamInt(r, "subsize")
@@ -690,7 +778,7 @@ func (request *rdsRequest) getQueryParams(r *http.Request) {
 		request.Cxmode = "Re"
 		request.CxmodeSet = false
 	}
-	var zminSet,zmaxSet bool
+	var zminSet, zmaxSet bool
 	request.Zmin, zminSet = getURLQueryParamFloat(r, "zmin")
 	if !zminSet {
 		request.Zmin = 0
@@ -728,12 +816,12 @@ func (request *rdsRequest) findZminMax() {
 		zminmaxRequest.Outysize = 1
 		zminmaxRequest.Outxsize = 1
 		zminmaxRequest.OutputFmt = "SD"
-		if (request.FileXSize*request.FileYSize) < configuration.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
+		if (request.FileXSize * request.FileYSize) < configuration.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
 			log.Println("Computing Zmax/Zmin on whole file, not previously computed")
-			min :=make([]float64,request.FileYSize)
-			max :=make([]float64,request.FileYSize)
+			min := make([]float64, request.FileYSize)
+			max := make([]float64, request.FileYSize)
 			done := make(chan bool, 1)
-			for line:=0;line<request.FileYSize;line++ {
+			for line := 0; line < request.FileYSize; line++ {
 				zminmaxRequest.Ystart = line
 				zminmaxRequest.Transform = "min"
 				go processline(min, line, done, zminmaxRequest)
@@ -745,12 +833,12 @@ func (request *rdsRequest) findZminMax() {
 			}
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
-			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin,request.Zmax}
-		} else { // If file is large then check the first, last, and a number of middles lines 
+			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
+		} else { // If file is large then check the first, last, and a number of middles lines
 			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed")
-			numMiddlesLines:= int(math.Max(float64((configuration.MaxBytesZminZmax/request.FileXSize)-2),0))
-			min :=make([]float64,2+numMiddlesLines)
-			max :=make([]float64,2+numMiddlesLines)
+			numMiddlesLines := int(math.Max(float64((configuration.MaxBytesZminZmax/request.FileXSize)-2), 0))
+			min := make([]float64, 2+numMiddlesLines)
+			max := make([]float64, 2+numMiddlesLines)
 			done := make(chan bool, 1)
 			// Process Min and Max of first line
 			zminmaxRequest.Ystart = 0
@@ -759,16 +847,16 @@ func (request *rdsRequest) findZminMax() {
 			zminmaxRequest.Transform = "max"
 			go processline(max, 0, done, zminmaxRequest)
 
-			//Process Min and Max of last line 
-			zminmaxRequest.Ystart = request.FileYSize-1
+			//Process Min and Max of last line
+			zminmaxRequest.Ystart = request.FileYSize - 1
 			zminmaxRequest.Transform = "min"
 			go processline(min, 1, done, zminmaxRequest)
 			zminmaxRequest.Transform = "max"
 			go processline(max, 1, done, zminmaxRequest)
 
-			//Process Min and Max from lines evenly spaced in the middle  
-			for i:=0; i<numMiddlesLines; i++ {
-				zminmaxRequest.Ystart = int(((request.FileYSize)/numMiddlesLines)*i)
+			//Process Min and Max from lines evenly spaced in the middle
+			for i := 0; i < numMiddlesLines; i++ {
+				zminmaxRequest.Ystart = int(((request.FileYSize) / numMiddlesLines) * i)
 				zminmaxRequest.Transform = "min"
 				go processline(min, i+2, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
@@ -779,7 +867,7 @@ func (request *rdsRequest) findZminMax() {
 			}
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
-			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin,request.Zmax}
+			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
 
 		}
 		log.Println("Found Zmin, Zmax to be", request.Zmin, request.Zmax)
@@ -787,49 +875,48 @@ func (request *rdsRequest) findZminMax() {
 	zminmaxtileMutex.Unlock()
 }
 
-
 type rdsServer struct{}
 
 func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var data []byte
-	var inCache bool 
+	var inCache bool
 	var ok bool
 	var rdsRequest rdsRequest
 
 	//Get URL Parameters
 	//url - /sds/rds/x1/y1/x2/y2/outxsize/outysize
-	rdsRequest.X1,ok = getURLArgumentInt(r.URL.Path,3)
+	rdsRequest.X1, ok = getURLArgumentInt(r.URL.Path, 3)
 	if !ok || rdsRequest.X1 < 0 {
 		log.Println("X1 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
-	rdsRequest.Y1, ok = getURLArgumentInt(r.URL.Path,4)
+	rdsRequest.Y1, ok = getURLArgumentInt(r.URL.Path, 4)
 	if !ok || rdsRequest.Y1 < 0 {
 		log.Println("Y1 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
-	rdsRequest.X2, ok = getURLArgumentInt(r.URL.Path,5)
+	rdsRequest.X2, ok = getURLArgumentInt(r.URL.Path, 5)
 	if !ok || rdsRequest.X2 < 0 {
 		log.Println("X2 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
-	rdsRequest.Y2, ok = getURLArgumentInt(r.URL.Path,6)
+	rdsRequest.Y2, ok = getURLArgumentInt(r.URL.Path, 6)
 	if !ok || rdsRequest.Y2 < 0 {
 		log.Println("Y2 Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
-	rdsRequest.Outxsize, ok = getURLArgumentInt(r.URL.Path,7)
+	rdsRequest.Outxsize, ok = getURLArgumentInt(r.URL.Path, 7)
 	if !ok || rdsRequest.Outxsize < 1 {
 		log.Println("outxsize Missing or Bad. Required Field")
 		w.WriteHeader(400)
 		return
 	}
 
-	rdsRequest.Outysize, ok = getURLArgumentInt(r.URL.Path,8)
+	rdsRequest.Outysize, ok = getURLArgumentInt(r.URL.Path, 8)
 	if !ok || rdsRequest.Outysize < 1 {
 		log.Println("outysize Missing or Bad. Required Field")
 		w.WriteHeader(400)
@@ -858,7 +945,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
-		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path,9)
+		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 9)
 		if !ok {
 			w.WriteHeader(400)
 			return
@@ -888,29 +975,29 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(400)
 			return
 		}
-		if rdsRequest.X1> rdsRequest.FileXSize {
+		if rdsRequest.X1 > rdsRequest.FileXSize {
 			log.Println("Invalid Request. Requested X1 greater than file X size")
 			w.WriteHeader(400)
 			return
 		}
-		if rdsRequest.X2> rdsRequest.FileXSize {
+		if rdsRequest.X2 > rdsRequest.FileXSize {
 			log.Println("Invalid Request. Requested X2 greater than file X size")
 			w.WriteHeader(400)
 			return
 		}
-		if rdsRequest.Y1> rdsRequest.FileYSize {
+		if rdsRequest.Y1 > rdsRequest.FileYSize {
 			log.Println("Invalid Request. Requested Y1 greater than file Y size")
 			w.WriteHeader(400)
 			return
 		}
-		if rdsRequest.Y2> rdsRequest.FileYSize {
+		if rdsRequest.Y2 > rdsRequest.FileYSize {
 			log.Println("Invalid Request. Requested Y2 greater than file Y size")
 			w.WriteHeader(400)
 			return
 		}
-		
+
 		//If Zmin and Zmax were not explitily given then compute
-		if !rdsRequest.Zset && rdsRequest.OutputFmt=="RGBA" {
+		if !rdsRequest.Zset && rdsRequest.OutputFmt == "RGBA" {
 			rdsRequest.findZminMax()
 		}
 
@@ -919,31 +1006,31 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			go putItemInCache(cacheFileName, "outputFiles/", data)
 		}
 
-	// Store MetaData of request off in cache
-	var fileMData fileMetaData
-	fileMData.Outxsize = rdsRequest.Outxsize
-	fileMData.Outysize = rdsRequest.Outysize
-	fileMData.Filexstart = rdsRequest.Filexstart
-	fileMData.Filexdelta = rdsRequest.Filexdelta
-	fileMData.Fileystart = rdsRequest.Fileystart
-	fileMData.Fileydelta = rdsRequest.Fileydelta
-	fileMData.Xstart = rdsRequest.Xstart
-	fileMData.Ystart = rdsRequest.Ystart
-	fileMData.Xsize = rdsRequest.Xsize
-	fileMData.Ysize = rdsRequest.Ysize
-	fileMData.Zmin = rdsRequest.Zmin
-	fileMData.Zmax = rdsRequest.Zmax
+		// Store MetaData of request off in cache
+		var fileMData fileMetaData
+		fileMData.Outxsize = rdsRequest.Outxsize
+		fileMData.Outysize = rdsRequest.Outysize
+		fileMData.Filexstart = rdsRequest.Filexstart
+		fileMData.Filexdelta = rdsRequest.Filexdelta
+		fileMData.Fileystart = rdsRequest.Fileystart
+		fileMData.Fileydelta = rdsRequest.Fileydelta
+		fileMData.Xstart = rdsRequest.Xstart
+		fileMData.Ystart = rdsRequest.Ystart
+		fileMData.Xsize = rdsRequest.Xsize
+		fileMData.Ysize = rdsRequest.Ysize
+		fileMData.Zmin = rdsRequest.Zmin
+		fileMData.Zmax = rdsRequest.Zmax
 
-	//var marshalError error
-	fileMDataJSON, marshalError := json.Marshal(fileMData)
-	if marshalError != nil {
-		log.Println("Error Encoding metadata file to cache", marshalError)
-		w.WriteHeader(400)
-		return
+		//var marshalError error
+		fileMDataJSON, marshalError := json.Marshal(fileMData)
+		if marshalError != nil {
+			log.Println("Error Encoding metadata file to cache", marshalError)
+			w.WriteHeader(400)
+			return
+		}
+		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
+
 	}
-	putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
-
-}
 
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
@@ -977,10 +1064,10 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("filexdelta", fmt.Sprintf("%f", fileMDataCache.Filexdelta))
 	w.Header().Add("fileystart", fmt.Sprintf("%f", fileMDataCache.Fileystart))
 	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileMDataCache.Fileydelta))
-	w.Header().Add("xmin",fmt.Sprintf("%f",fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
-	w.Header().Add("xmax",fmt.Sprintf("%f",fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
-	w.Header().Add("ymin",fmt.Sprintf("%f",fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
-	w.Header().Add("ymax",fmt.Sprintf("%f",fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
+	w.Header().Add("xmin", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
+	w.Header().Add("xmax", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
+	w.Header().Add("ymin", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
+	w.Header().Add("ymax", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(data)
@@ -990,45 +1077,45 @@ type rdsTileServer struct{}
 
 func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var data []byte
-	var inCache,ok bool
+	var inCache, ok bool
 
 	var tileRequest rdsRequest
 	tileRequest.TileRequest = true
-	
+
 	// Get URL Parameters
 	//url - /sds/rdstile/tileXSize/tileYSize/decxMode/decYMode/tileX/tileY/locationName
-	allowedTileSizes := [5]int{100,200,300,400,500}
-	tileRequest.TileXSize,ok = getURLArgumentInt(r.URL.Path,3)
-	if !ok || !intInSlice(tileRequest.TileXSize,allowedTileSizes[:]) {
-		log.Println("tileXSize must be in one of: 100,200,300,400,500" , tileRequest.TileXSize)
+	allowedTileSizes := [5]int{100, 200, 300, 400, 500}
+	tileRequest.TileXSize, ok = getURLArgumentInt(r.URL.Path, 3)
+	if !ok || !intInSlice(tileRequest.TileXSize, allowedTileSizes[:]) {
+		log.Println("tileXSize must be in one of: 100,200,300,400,500", tileRequest.TileXSize)
 		w.WriteHeader(400)
 		return
 	}
-	tileRequest.TileYSize,ok = getURLArgumentInt(r.URL.Path,4)
-	if !ok || !intInSlice(tileRequest.TileYSize,allowedTileSizes[:]) {
-		log.Println("tileYSize must be in one of: 100,200,300,400,500" , tileRequest.TileYSize)
+	tileRequest.TileYSize, ok = getURLArgumentInt(r.URL.Path, 4)
+	if !ok || !intInSlice(tileRequest.TileYSize, allowedTileSizes[:]) {
+		log.Println("tileYSize must be in one of: 100,200,300,400,500", tileRequest.TileYSize)
 		w.WriteHeader(400)
 		return
 	}
-	tileRequest.DecXMode,ok = getURLArgumentInt(r.URL.Path,5)
+	tileRequest.DecXMode, ok = getURLArgumentInt(r.URL.Path, 5)
 	if !ok || tileRequest.DecXMode < 0 || tileRequest.DecXMode > 10 {
-		log.Println("decXMode Bad or out of range 0 to 10. got:" , tileRequest.DecXMode)
+		log.Println("decXMode Bad or out of range 0 to 10. got:", tileRequest.DecXMode)
 		w.WriteHeader(400)
 		return
 	}
-	tileRequest.DecYMode,ok = getURLArgumentInt(r.URL.Path,6)
+	tileRequest.DecYMode, ok = getURLArgumentInt(r.URL.Path, 6)
 	if !ok || tileRequest.DecYMode < 0 || tileRequest.DecYMode > 10 {
-		log.Println("decYMode Bad or out of range 0 to 10. got:" , tileRequest.DecYMode)
+		log.Println("decYMode Bad or out of range 0 to 10. got:", tileRequest.DecYMode)
 		w.WriteHeader(400)
 		return
 	}
-	tileRequest.TileX,ok = getURLArgumentInt(r.URL.Path,7)
+	tileRequest.TileX, ok = getURLArgumentInt(r.URL.Path, 7)
 	if !ok || tileRequest.TileX < 0 {
 		log.Println("tileX must be great than zero")
 		w.WriteHeader(400)
 		return
 	}
-	tileRequest.TileY, ok = getURLArgumentInt(r.URL.Path,8)
+	tileRequest.TileY, ok = getURLArgumentInt(r.URL.Path, 8)
 	if !ok || tileRequest.TileY < 0 {
 		log.Println("tileY must be great than zero")
 		w.WriteHeader(400)
@@ -1036,7 +1123,7 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tileRequest.getQueryParams(r)
-	
+
 	tileRequest.computeTileSizes()
 
 	if tileRequest.Xsize < 1 || tileRequest.Ysize < 1 {
@@ -1058,7 +1145,7 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
-		tileRequest.Reader, tileRequest.FileName, ok = openDataSource(r.URL.Path,9)
+		tileRequest.Reader, tileRequest.FileName, ok = openDataSource(r.URL.Path, 9)
 		if !ok {
 			w.WriteHeader(400)
 			return
@@ -1084,19 +1171,19 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if tileRequest.Xstart>=tileRequest.FileXSize || tileRequest.Ystart>=tileRequest.FileYSize {
-			log.Println("Invalid Tile Request. " , tileRequest.Xstart, tileRequest.FileXSize, tileRequest.Ystart, tileRequest.FileYSize)
+		if tileRequest.Xstart >= tileRequest.FileXSize || tileRequest.Ystart >= tileRequest.FileYSize {
+			log.Println("Invalid Tile Request. ", tileRequest.Xstart, tileRequest.FileXSize, tileRequest.Ystart, tileRequest.FileYSize)
 			w.WriteHeader(400)
 			return
 		}
 
-		if (tileRequest.Xstart+tileRequest.Xsize)>tileRequest.FileXSize {
-			tileRequest.Xsize=tileRequest.FileXSize-tileRequest.Xstart
-			tileRequest.Outxsize=tileRequest.Xsize/tileRequest.DecX
+		if (tileRequest.Xstart + tileRequest.Xsize) > tileRequest.FileXSize {
+			tileRequest.Xsize = tileRequest.FileXSize - tileRequest.Xstart
+			tileRequest.Outxsize = tileRequest.Xsize / tileRequest.DecX
 		}
-		if (tileRequest.Ystart+tileRequest.Ysize)>tileRequest.FileYSize {
-			tileRequest.Ysize=tileRequest.FileYSize-tileRequest.Ystart
-			tileRequest.Outysize=tileRequest.Ysize/tileRequest.DecY
+		if (tileRequest.Ystart + tileRequest.Ysize) > tileRequest.FileYSize {
+			tileRequest.Ysize = tileRequest.FileYSize - tileRequest.Ystart
+			tileRequest.Outysize = tileRequest.Ysize / tileRequest.DecY
 		}
 		if tileRequest.Xsize > tileRequest.FileXSize {
 			log.Println("Invalid Request. Requested X size greater than file X size")
@@ -1128,7 +1215,6 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fileMData.Ysize = tileRequest.Ysize
 		fileMData.Zmin = tileRequest.Zmin
 		fileMData.Zmax = tileRequest.Zmax
-
 
 		//var marshalError error
 		fileMDataJSON, marshalError := json.Marshal(fileMData)
@@ -1176,10 +1262,408 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("filexdelta", fmt.Sprintf("%f", fileMDataCache.Filexdelta))
 	w.Header().Add("fileystart", fmt.Sprintf("%f", fileMDataCache.Fileystart))
 	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileMDataCache.Fileydelta))
-	w.Header().Add("xmin",fmt.Sprintf("%f",fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
-	w.Header().Add("xmax",fmt.Sprintf("%f",fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
-	w.Header().Add("ymin",fmt.Sprintf("%f",fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
-	w.Header().Add("ymax",fmt.Sprintf("%f",fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
+	w.Header().Add("xmin", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
+	w.Header().Add("xmax", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
+	w.Header().Add("ymin", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
+	w.Header().Add("ymax", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
+	w.WriteHeader(http.StatusOK)
+
+	w.Write(data)
+}
+
+type ldsServer struct{}
+
+func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var data []byte
+	var inCache bool
+	var ok bool
+	var rdsRequest rdsRequest
+
+	//Get URL Parameters
+	//url - /sds/lds/x1/x2/outxsize/outzsize
+
+	rdsRequest.X1, ok = getURLArgumentInt(r.URL.Path, 3)
+	if !ok || rdsRequest.X1 < 0 {
+		log.Println("X1 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.X2, ok = getURLArgumentInt(r.URL.Path, 4)
+	if !ok || rdsRequest.X2 < 0 {
+		log.Println("X2 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+
+	rdsRequest.Outxsize, ok = getURLArgumentInt(r.URL.Path, 5)
+	if !ok || rdsRequest.Outxsize < 1 {
+		log.Println("outxsize Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+
+	rdsRequest.Outzsize, ok = getURLArgumentInt(r.URL.Path, 6)
+	if !ok || rdsRequest.Outzsize < 1 {
+		log.Println("outzsize Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+
+	rdsRequest.getQueryParams(r)
+
+	rdsRequest.computeRequestSizes()
+
+	rdsRequest.Ystart = 0
+	rdsRequest.Ysize = 1
+
+	if rdsRequest.Xsize < 1 {
+		log.Println("Bad Xsize: ", rdsRequest.Xsize)
+		w.WriteHeader(400)
+		return
+	}
+
+	log.Println("LDS Request params xstart, xsize, outxsize, outzsize:", rdsRequest.Xstart, rdsRequest.Xsize, rdsRequest.Outxsize, rdsRequest.Outzsize)
+
+	start := time.Now()
+	cacheFileName := urlToCacheFileName(r.URL.Path, r.URL.RawQuery)
+	// Check if request has been previously processed and is in cache. If not process Request.
+	if *useCache {
+		data, inCache = getDataFromCache(cacheFileName, "outputFiles/")
+	} else {
+		inCache = false
+	}
+
+	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
+		log.Println("RDS Request not in Cache, computing result")
+		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 7)
+		if !ok {
+			w.WriteHeader(400)
+			return
+		}
+
+		if strings.Contains(rdsRequest.FileName, ".tmp") || strings.Contains(rdsRequest.FileName, ".prm") {
+			rdsRequest.processBlueFileHeader()
+			if rdsRequest.FileType != 1000 {
+				log.Println("Line Plots only support Type 100 files.")
+				w.WriteHeader(400)
+				return
+			}
+			rdsRequest.FileXSize = int(float64(rdsRequest.FileDataSize) / bytesPerAtomMap[string(rdsRequest.FileFormat[1])])
+			rdsRequest.FileYSize = 1
+		} else {
+			log.Println("Invalid File Type")
+			w.WriteHeader(400)
+			return
+		}
+		// Check Request against File Size
+		if rdsRequest.Xsize > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X size greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X1 > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X1 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X2 > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X2 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+
+		//If Zmin and Zmax were not explitily given then compute
+		if !rdsRequest.Zset {
+			rdsRequest.findZminMax()
+		}
+
+		data = processLineRequest(rdsRequest, "lds")
+
+		if *useCache {
+			go putItemInCache(cacheFileName, "outputFiles/", data)
+		}
+
+		// Store MetaData of request off in cache
+		var fileMData fileMetaData
+		fileMData.Outxsize = rdsRequest.Outxsize
+		fileMData.Outysize = rdsRequest.Outysize
+		fileMData.Outzsize = rdsRequest.Outzsize
+		fileMData.Filexstart = rdsRequest.Filexstart
+		fileMData.Filexdelta = rdsRequest.Filexdelta
+		fileMData.Fileystart = rdsRequest.Fileystart
+		fileMData.Fileydelta = rdsRequest.Fileydelta
+		fileMData.Xstart = rdsRequest.Xstart
+		fileMData.Ystart = rdsRequest.Ystart
+		fileMData.Xsize = rdsRequest.Xsize
+		fileMData.Ysize = rdsRequest.Ysize
+		fileMData.Zmin = rdsRequest.Zmin
+		fileMData.Zmax = rdsRequest.Zmax
+
+		//var marshalError error
+		fileMDataJSON, marshalError := json.Marshal(fileMData)
+		if marshalError != nil {
+			log.Println("Error Encoding metadata file to cache", marshalError)
+			w.WriteHeader(400)
+			return
+		}
+		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
+
+	}
+	elapsed := time.Since(start)
+	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
+
+	// Get the metadata for this request to put into the return header.
+	fileMetaDataJSON, metaInCache := getDataFromCache(cacheFileName+"meta", "outputFiles/")
+	if !metaInCache {
+		log.Println("Error reading the metadata file from cache")
+		w.WriteHeader(400)
+		return
+	}
+	var fileMDataCache fileMetaData
+	marshalError := json.Unmarshal(fileMetaDataJSON, &fileMDataCache)
+	if marshalError != nil {
+		log.Println("Error Decoding metadata file from cache", marshalError)
+		w.WriteHeader(400)
+		return
+	}
+	// Create a Return header with some metadata in it.
+	outxsizeStr := strconv.Itoa(fileMDataCache.Outxsize)
+	outysizeStr := strconv.Itoa(fileMDataCache.Outysize)
+	outzsizeStr := strconv.Itoa(fileMDataCache.Outzsize)
+
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "outxsize,outysize,zmin,zmax,filexstart,filexdelta,fileystart,fileydelta,xmin,xmax,ymin,ymax")
+	w.Header().Add("outxsize", outxsizeStr)
+	w.Header().Add("outysize", outysizeStr)
+	w.Header().Add("outzsize", outzsizeStr)
+	w.Header().Add("zmin", fmt.Sprintf("%f", fileMDataCache.Zmin))
+	w.Header().Add("zmax", fmt.Sprintf("%f", fileMDataCache.Zmax))
+	w.Header().Add("filexstart", fmt.Sprintf("%f", fileMDataCache.Filexstart))
+	w.Header().Add("filexdelta", fmt.Sprintf("%f", fileMDataCache.Filexdelta))
+	w.Header().Add("fileystart", fmt.Sprintf("%f", fileMDataCache.Fileystart))
+	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileMDataCache.Fileydelta))
+	w.Header().Add("xmin", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
+	w.Header().Add("xmax", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
+	w.Header().Add("ymin", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
+	w.Header().Add("ymax", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
+	w.WriteHeader(http.StatusOK)
+
+	w.Write(data)
+
+}
+
+type rdsxyCutServer struct{}
+
+func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var data []byte
+	var inCache bool
+	var ok bool
+	var rdsRequest rdsRequest
+
+	//Get URL Parameters
+	//url - /sds/rdsxcut/x1/y1/x2/y2/outxsize/outzsize
+	cutType := strings.Split(r.URL.Path, "/")[2] //rdsxcut or rdsycut
+
+	rdsRequest.X1, ok = getURLArgumentInt(r.URL.Path, 3)
+	if !ok || rdsRequest.X1 < 0 {
+		log.Println("X1 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.Y1, ok = getURLArgumentInt(r.URL.Path, 4)
+	if !ok || rdsRequest.Y1 < 0 {
+		log.Println("Y1 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.X2, ok = getURLArgumentInt(r.URL.Path, 5)
+	if !ok || rdsRequest.X2 < 0 {
+		log.Println("X2 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.Y2, ok = getURLArgumentInt(r.URL.Path, 6)
+	if !ok || rdsRequest.Y2 < 0 {
+		log.Println("Y2 Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.Outxsize, ok = getURLArgumentInt(r.URL.Path, 7)
+	if !ok || rdsRequest.Outxsize < 1 {
+		log.Println("outxsize Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+
+	rdsRequest.Outzsize, ok = getURLArgumentInt(r.URL.Path, 8)
+	if !ok || rdsRequest.Outzsize < 1 {
+		log.Println("outzsize Missing or Bad. Required Field")
+		w.WriteHeader(400)
+		return
+	}
+	rdsRequest.getQueryParams(r)
+
+	rdsRequest.computeRequestSizes()
+
+	if rdsRequest.Xsize < 1 || rdsRequest.Ysize < 1 {
+		log.Println("Bad Xsize or ysize. xsize: ", rdsRequest.Xsize, " ysize: ", rdsRequest.Ysize)
+		w.WriteHeader(400)
+		return
+	}
+
+	if cutType == "rdsxcut" {
+		if rdsRequest.Ysize > 1 {
+			log.Println("Currently only support cut of one y line. ysize:", rdsRequest.Ysize)
+			w.WriteHeader(400)
+			return
+		}
+	} else if cutType == "rdsycut" {
+		if rdsRequest.Xsize > 1 {
+			log.Println("Currently only support cut of one x line. xsize:", rdsRequest.Xsize)
+			w.WriteHeader(400)
+			return
+		}
+	}
+
+	log.Println("RDS XY Cut Request params xstart, ystart, xsize, ysize, outxsize, outzsize:", cutType, rdsRequest.Xstart, rdsRequest.Ystart, rdsRequest.Xsize, rdsRequest.Ysize, rdsRequest.Outxsize, rdsRequest.Outzsize)
+
+	start := time.Now()
+	cacheFileName := urlToCacheFileName(r.URL.Path, r.URL.RawQuery)
+	// Check if request has been previously processed and is in cache. If not process Request.
+	if *useCache {
+		data, inCache = getDataFromCache(cacheFileName, "outputFiles/")
+	} else {
+		inCache = false
+	}
+
+	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
+		log.Println("RDS Request not in Cache, computing result")
+		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 9)
+		if !ok {
+			w.WriteHeader(400)
+			return
+		}
+
+		if strings.Contains(rdsRequest.FileName, ".tmp") || strings.Contains(rdsRequest.FileName, ".prm") {
+			rdsRequest.processBlueFileHeader()
+			if rdsRequest.SubsizeSet {
+				rdsRequest.FileXSize = rdsRequest.Subsize
+
+			} else {
+				if rdsRequest.FileType == 1000 {
+					log.Println("For type 1000 files, a subsize needs to be set")
+					w.WriteHeader(400)
+					return
+				}
+			}
+			rdsRequest.computeYSize()
+		} else {
+			log.Println("Invalid File Type")
+			w.WriteHeader(400)
+			return
+		}
+
+		// Check Request against File Size
+		if rdsRequest.Xsize > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X size greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X1 > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X1 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.X2 > rdsRequest.FileXSize {
+			log.Println("Invalid Request. Requested X2 greater than file X size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.Y1 > rdsRequest.FileYSize {
+			log.Println("Invalid Request. Requested Y1 greater than file Y size")
+			w.WriteHeader(400)
+			return
+		}
+		if rdsRequest.Y2 > rdsRequest.FileYSize {
+			log.Println("Invalid Request. Requested Y2 greater than file Y size")
+			w.WriteHeader(400)
+			return
+		}
+
+		//If Zmin and Zmax were not explitily given then compute
+		if !rdsRequest.Zset {
+			rdsRequest.findZminMax()
+		}
+
+		data = processLineRequest(rdsRequest, cutType)
+
+		if *useCache {
+			go putItemInCache(cacheFileName, "outputFiles/", data)
+		}
+
+		// Store MetaData of request off in cache
+		var fileMData fileMetaData
+		fileMData.Outxsize = rdsRequest.Outxsize
+		fileMData.Outysize = rdsRequest.Outysize
+		fileMData.Outzsize = rdsRequest.Outzsize
+		fileMData.Filexstart = rdsRequest.Filexstart
+		fileMData.Filexdelta = rdsRequest.Filexdelta
+		fileMData.Fileystart = rdsRequest.Fileystart
+		fileMData.Fileydelta = rdsRequest.Fileydelta
+		fileMData.Xstart = rdsRequest.Xstart
+		fileMData.Ystart = rdsRequest.Ystart
+		fileMData.Xsize = rdsRequest.Xsize
+		fileMData.Ysize = rdsRequest.Ysize
+		fileMData.Zmin = rdsRequest.Zmin
+		fileMData.Zmax = rdsRequest.Zmax
+
+		//var marshalError error
+		fileMDataJSON, marshalError := json.Marshal(fileMData)
+		if marshalError != nil {
+			log.Println("Error Encoding metadata file to cache", marshalError)
+			w.WriteHeader(400)
+			return
+		}
+		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
+
+	}
+	elapsed := time.Since(start)
+	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
+
+	// Get the metadata for this request to put into the return header.
+	fileMetaDataJSON, metaInCache := getDataFromCache(cacheFileName+"meta", "outputFiles/")
+	if !metaInCache {
+		log.Println("Error reading the metadata file from cache")
+		w.WriteHeader(400)
+		return
+	}
+	var fileMDataCache fileMetaData
+	marshalError := json.Unmarshal(fileMetaDataJSON, &fileMDataCache)
+	if marshalError != nil {
+		log.Println("Error Decoding metadata file from cache", marshalError)
+		w.WriteHeader(400)
+		return
+	}
+	// Create a Return header with some metadata in it.
+	outxsizeStr := strconv.Itoa(fileMDataCache.Outxsize)
+	outysizeStr := strconv.Itoa(fileMDataCache.Outysize)
+	outzsizeStr := strconv.Itoa(fileMDataCache.Outzsize)
+
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "outxsize,outysize,zmin,zmax,filexstart,filexdelta,fileystart,fileydelta,xmin,xmax,ymin,ymax")
+	w.Header().Add("outxsize", outxsizeStr)
+	w.Header().Add("outysize", outysizeStr)
+	w.Header().Add("outzsize", outzsizeStr)
+	w.Header().Add("zmin", fmt.Sprintf("%f", fileMDataCache.Zmin))
+	w.Header().Add("zmax", fmt.Sprintf("%f", fileMDataCache.Zmax))
+	w.Header().Add("filexstart", fmt.Sprintf("%f", fileMDataCache.Filexstart))
+	w.Header().Add("filexdelta", fmt.Sprintf("%f", fileMDataCache.Filexdelta))
+	w.Header().Add("fileystart", fmt.Sprintf("%f", fileMDataCache.Fileystart))
+	w.Header().Add("fileydelta", fmt.Sprintf("%f", fileMDataCache.Fileydelta))
+	w.Header().Add("xmin", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart)))
+	w.Header().Add("xmax", fmt.Sprintf("%f", fileMDataCache.Filexstart+fileMDataCache.Filexdelta*float64(fileMDataCache.Xstart+fileMDataCache.Xsize)))
+	w.Header().Add("ymin", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart)))
+	w.Header().Add("ymax", fmt.Sprintf("%f", fileMDataCache.Fileystart+fileMDataCache.Fileydelta*float64(fileMDataCache.Ystart+fileMDataCache.Ysize)))
 	w.WriteHeader(http.StatusOK)
 
 	w.Write(data)
@@ -1187,14 +1671,14 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 //var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 var configFile = flag.String("config", "./sdsConfig.json", "Location of Config File")
-var useCache = flag.Bool("usecache", true, "Use SDS Cache. Can be disabled for certain cases like testing." )
+var useCache = flag.Bool("usecache", true, "Use SDS Cache. Can be disabled for certain cases like testing.")
 
 type fileHeaderServer struct{}
 
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("fileHeaderServer", r.URL.Path)
-	reader, fileName, succeed := openDataSource(r.URL.Path,3)
+	reader, fileName, succeed := openDataSource(r.URL.Path, 3)
 	if !succeed {
 		log.Println("Error Reading from Data Source")
 		w.WriteHeader(400)
@@ -1305,22 +1789,22 @@ func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type rawServer struct{}
 
 func (s *rawServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    reader, fileName, succeed := openDataSource(r.URL.Path,3)
-    if !succeed {
-	    log.Println("Error Reading from Data Source")
-	    w.WriteHeader(400)
-	    return
-    }
+	reader, fileName, succeed := openDataSource(r.URL.Path, 3)
+	if !succeed {
+		log.Println("Error Reading from Data Source")
+		w.WriteHeader(400)
+		return
+	}
 
-    if strings.Contains(fileName, ".tmp") || strings.Contains(fileName, ".prm") {
-        w.Header().Add("Content-Type", "application/bluefile")
-    } else {
-        w.Header().Add("Content-Type", "application/binary")
-    }
-    w.Header().Add("Access-Control-Allow-Origin", "*")
-    w.Header().Add("Access-Control-Expose-Headers", "*")
+	if strings.Contains(fileName, ".tmp") || strings.Contains(fileName, ".prm") {
+		w.Header().Add("Content-Type", "application/bluefile")
+	} else {
+		w.Header().Add("Content-Type", "application/binary")
+	}
+	w.Header().Add("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Expose-Headers", "*")
 
-    http.ServeContent(w, r, fileName, time.Now(), reader)
+	http.ServeContent(w, r, fileName, time.Now(), reader)
 }
 
 func handleUI(h http.Handler) http.Handler {
@@ -1378,15 +1862,15 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println("fileSystemServer", r.URL.Path)
 	pathData := strings.Split(r.URL.Path, "/")
 
-	if len(pathData) ==3 || (len(pathData) ==4 && pathData[3]==""){ //If no path is specified after /sds/ then list locations
+	if len(pathData) == 3 || (len(pathData) == 4 && pathData[3] == "") { //If no path is specified after /sds/ then list locations
 		locationListServer := &locationListServer{}
 		locationListServer.ServeHTTP(w, r)
 		return
-	} 
+	}
 
 	locationName := pathData[3]
 	var urlPath string = ""
-	for i :=4; i < len(pathData); i++ {
+	for i := 4; i < len(pathData); i++ {
 		urlPath = urlPath + pathData[i] + "/"
 	}
 
@@ -1401,8 +1885,8 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if  currentLocation.LocationType != "localFile" {
-		log.Println("Error: Listing Files only support for localfile location Types" )
+	if currentLocation.LocationType != "localFile" {
+		log.Println("Error: Listing Files only support for localfile location Types")
 		w.WriteHeader(400)
 		return
 	}
@@ -1412,19 +1896,18 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	fullFilepath := fmt.Sprintf("%s%s", currentLocation.Path, urlPath)
 	fi, err := os.Stat(fullFilepath)
-    if err != nil {
+	if err != nil {
 		log.Println("Error reading path", fullFilepath, err)
 		w.WriteHeader(400)
-        return
-    }
-	mode := fi.Mode() 
+		return
+	}
+	mode := fi.Mode()
 	if mode.IsRegular() { //If the URL is to a file, then use raw mode to return file contents
 		log.Println("Path is a file, so will return its contents in raw mode")
 		rawServer := &rawServer{}
 		rawServer.ServeHTTP(w, r)
-		return 
+		return
 	}
-
 
 	files, err := ioutil.ReadDir(fullFilepath)
 	if err != nil {
@@ -1433,17 +1916,17 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type fileObj struct {
-		Filename  	string`json:"filename"`
-		Type   		string`json:"type"`
+		Filename string `json:"filename"`
+		Type     string `json:"type"`
 	}
-	filelist := make([]fileObj,len(files))
-	i:=0
+	filelist := make([]fileObj, len(files))
+	i := 0
 	for _, file := range files {
 		filelist[i].Filename = file.Name()
-		if (file.IsDir()) {
-			filelist[i].Type="directory"
+		if file.IsDir() {
+			filelist[i].Type = "directory"
 		} else {
-			filelist[i].Type="file"
+			filelist[i].Type = "file"
 		}
 		i++
 	}
@@ -1470,10 +1953,12 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rdsServer := &rdsServer{}
 	rdsTileServer := &rdsTileServer{}
 	headerServer := &fileHeaderServer{}
-	fileSystemServer :=&fileSystemServer{}
+	fileSystemServer := &fileSystemServer{}
+	rdsxyCutServer := &rdsxyCutServer{}
+	ldsServer := &ldsServer{}
 
-	if string(r.URL.Path[0]) !="/" {
-		r.URL.Path = ("/")+string(r.URL.Path)
+	if string(r.URL.Path[0]) != "/" {
+		r.URL.Path = ("/") + string(r.URL.Path)
 	}
 
 	pathData := strings.Split(r.URL.Path, "/")
@@ -1487,8 +1972,14 @@ func (s *routerServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rdsServer.ServeHTTP(w, r)
 	case "rdstile":
 		rdsTileServer.ServeHTTP(w, r)
+	case "rdsxcut":
+		rdsxyCutServer.ServeHTTP(w, r)
+	case "rdsycut":
+		rdsxyCutServer.ServeHTTP(w, r)
+	case "lds":
+		ldsServer.ServeHTTP(w, r)
 	default:
-		log.Println("Unknown Mode",mode)
+		log.Println("Unknown Mode", mode)
 		w.WriteHeader(400)
 		return
 	}
@@ -1539,7 +2030,7 @@ func setupConfigLogCache() {
 	go checkCache(outputPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
 	go checkCache(minioPath, configuration.CheckCacheEvery, configuration.CacheMaxBytes)
 
-	zminzmaxFileMap= make(map[string]Zminzmax)
+	zminzmaxFileMap = make(map[string]Zminzmax)
 }
 
 func main() {
@@ -1563,7 +2054,7 @@ func main() {
 	// decX := 3
 	// decY := 3
 	// tileX := 0
-	// tileY := 0 
+	// tileY := 0
 	// locationName := "TestData"
 	// filename := "mydata_SI_8192_20000.tmp"
 	// outfmt:= "RGBA"
@@ -1575,7 +2066,7 @@ func main() {
 	// rdsServer.ServeHTTP(rr,req)
 
 	// tileX =1
-	// tileY = 0 
+	// tileY = 0
 	// sdsurl = "/sds/rdstile/" + strconv.Itoa(tileXsize)+"/"+strconv.Itoa(tileYsize)+"/"+strconv.Itoa(decX)+"/"+strconv.Itoa(decY)+"/"+strconv.Itoa(tileX)+"/"+strconv.Itoa(tileY)+"/"+locationName+"/"+filename+"?outfmt="+outfmt
 	// req, _ = http.NewRequest("GET", sdsurl, nil)
 	// rdsServer.ServeHTTP(rr,req)
@@ -1611,14 +2102,13 @@ func main() {
 		})
 	}
 
-
 	msg := ":%d"
 	bindAddr := fmt.Sprintf(msg, configuration.Port)
 
 	svr := &http.Server{
-		Addr: bindAddr,
-		ReadTimeout: 240 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:           bindAddr,
+		ReadTimeout:    240 * time.Second,
+		WriteTimeout:   30 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 	log.Fatal(svr.ListenAndServe())

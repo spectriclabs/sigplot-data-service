@@ -1,14 +1,11 @@
 package main
 
 import (
-
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
-
 )
-
 
 func getURLQueryParamFloat(r *http.Request, keyname string) (float64, bool) {
 	keys, ok := r.URL.Query()[keyname]
@@ -58,11 +55,10 @@ func getURLArgumentInt(url string, positionNum int) (int, bool) {
 }
 
 func intInSlice(a int, list []int) bool {
-    for _, b := range list {
-        if b == a {
-            return true
-        }
-    }
-    return false
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
-
