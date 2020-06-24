@@ -12,4 +12,4 @@ release: ui
 	go build -tags ui
 
 docker:
-	docker build -t sds:0.4 .
+	docker build -t sds:0.5 .
