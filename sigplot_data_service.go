@@ -431,16 +431,14 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Lo":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := datain[i] * datain[i]
-				mag2 = math.Max(mag2, loThresh)
+				mag2 := math.Max(datain[i], loThresh)
 				outData[i] = 10 * math.Log10(mag2)
 			}
 			return outData
 		case "L2":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := datain[i] * datain[i]
-				mag2 = math.Max(mag2, loThresh)
+				mag2 := math.Max(datain[i], loThresh)
 				outData[i] = 20 * math.Log10(mag2)
 			}
 			return outData
