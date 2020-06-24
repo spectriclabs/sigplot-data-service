@@ -412,7 +412,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Ma":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				outData[i] = math.Sqrt(datain[i] * datain[i] * 2)
+				outData[i] = math.Sqrt(datain[i] * datain[i])
 			}
 			return outData
 		case "Ph":
@@ -431,7 +431,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "Lo":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := 2 * datain[i] * datain[i]
+				mag2 := datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 10 * math.Log10(mag2)
 			}
@@ -439,7 +439,7 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 		case "L2":
 			outData := make([]float64, len(datain))
 			for i := 0; i < len(datain); i++ {
-				mag2 := 2 * datain[i] * datain[i]
+				mag2 := datain[i] * datain[i]
 				mag2 = math.Max(mag2, loThresh)
 				outData[i] = 20 * math.Log10(mag2)
 			}
