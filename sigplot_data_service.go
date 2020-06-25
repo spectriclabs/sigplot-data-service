@@ -800,6 +800,7 @@ func (request *rdsRequest) getQueryParams(r *http.Request) {
 }
 
 func (request *rdsRequest) findZminMax() {
+	start := time.Now()
 	zminmaxtileMutex.Lock()
 	zminmax, ok := zminzmaxFileMap[request.FileName+request.Cxmode]
 	if ok {
@@ -814,7 +815,13 @@ func (request *rdsRequest) findZminMax() {
 		zminmaxRequest.Outysize = 1
 		zminmaxRequest.Outxsize = 1
 		zminmaxRequest.OutputFmt = "SD"
-		if (request.FileXSize * request.FileYSize) < configuration.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
+		bytesPerAtom, complexFlag := getFileTypeInfo(request.FileFormat)
+		bytesPerElement := bytesPerAtom
+		if complexFlag {
+			bytesPerElement = bytesPerElement * 2
+		}
+		log.Println("Computing Zminmax", bytesPerElement, request.FileXSize, request.FileYSize, configuration.MaxBytesZminZmax)
+		if (int(float64(request.FileXSize*request.FileYSize) * (bytesPerElement))) < configuration.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
 			log.Println("Computing Zmax/Zmin on whole file, not previously computed")
 			min := make([]float64, request.FileYSize)
 			max := make([]float64, request.FileYSize)
@@ -833,24 +840,29 @@ func (request *rdsRequest) findZminMax() {
 			request.Zmax = floats.Max(max)
 			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
 		} else { // If file is large then check the first, last, and a number of middles lines
-			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed")
 			numMiddlesLines := int(math.Max(float64((configuration.MaxBytesZminZmax/request.FileXSize)-2), 0))
+			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed. Number of middle lines:", numMiddlesLines)
 			min := make([]float64, 2+numMiddlesLines)
 			max := make([]float64, 2+numMiddlesLines)
 			done := make(chan bool, 1)
+			numRequested := 0
 			// Process Min and Max of first line
 			zminmaxRequest.Ystart = 0
 			zminmaxRequest.Transform = "min"
 			go processline(min, 0, done, zminmaxRequest)
 			zminmaxRequest.Transform = "max"
 			go processline(max, 0, done, zminmaxRequest)
+			numRequested += 2
 
 			//Process Min and Max of last line
 			zminmaxRequest.Ystart = request.FileYSize - 1
-			zminmaxRequest.Transform = "min"
-			go processline(min, 1, done, zminmaxRequest)
-			zminmaxRequest.Transform = "max"
-			go processline(max, 1, done, zminmaxRequest)
+			if zminmaxRequest.Ystart != 0 { // If the last line is the first line, don't do it again.
+				zminmaxRequest.Transform = "min"
+				go processline(min, 1, done, zminmaxRequest)
+				zminmaxRequest.Transform = "max"
+				go processline(max, 1, done, zminmaxRequest)
+				numRequested += 2
+			}
 
 			//Process Min and Max from lines evenly spaced in the middle
 			for i := 0; i < numMiddlesLines; i++ {
@@ -859,8 +871,9 @@ func (request *rdsRequest) findZminMax() {
 				go processline(min, i+2, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
 				go processline(max, i+2, done, zminmaxRequest)
+				numRequested += 2
 			}
-			for i := 0; i < (2+numMiddlesLines)*2; i++ {
+			for i := 0; i < numRequested; i++ {
 				<-done
 			}
 			request.Zmin = floats.Min(min)
@@ -868,7 +881,9 @@ func (request *rdsRequest) findZminMax() {
 			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
 
 		}
-		log.Println("Found Zmin, Zmax to be", request.Zmin, request.Zmax)
+		elapsed := time.Since(start)
+		log.Println("Found Zmin, Zmax to be", request.Zmin, request.Zmax, " in ", elapsed)
+
 	}
 	zminmaxtileMutex.Unlock()
 }
