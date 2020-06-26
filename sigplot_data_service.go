@@ -839,7 +839,47 @@ func (request *rdsRequest) findZminMax() {
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
 			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
-		} else { // If file is large then check the first, last, and a number of middles lines
+		} else if request.FileYSize == 1 { //If the file is large but only has one line then we need to break it into section in the x direction.
+			log.Println("Computing Zmax/Zmin on section of 1D file, not previously computed")
+			numSubSections := 4
+			min := make([]float64, numSubSections)
+			max := make([]float64, numSubSections)
+			done := make(chan bool, 1)
+			spaceBytes := (float64(request.FileXSize) * bytesPerElement) - float64(configuration.MaxBytesZminZmax)
+			elementsPerSpace := int((spaceBytes / bytesPerElement)) / (numSubSections - 1)
+			elementsPerSection := int(configuration.MaxBytesZminZmax / numSubSections)
+
+			zminmaxRequest.Xsize = elementsPerSection
+			// First section of the file
+			zminmaxRequest.Xstart = 0
+			zminmaxRequest.Transform = "min"
+			go processline(min, 0, done, zminmaxRequest)
+			zminmaxRequest.Transform = "max"
+			go processline(max, 0, done, zminmaxRequest)
+			// Middle Sections of the file
+			for section := 1; section < numSubSections-1; section++ {
+				zminmaxRequest.Xstart = section * (elementsPerSection + elementsPerSpace)
+				zminmaxRequest.Transform = "min"
+				go processline(min, section, done, zminmaxRequest)
+				zminmaxRequest.Transform = "max"
+				go processline(max, section, done, zminmaxRequest)
+
+			}
+
+			// Last Section of the file
+			zminmaxRequest.Xstart = request.FileXSize - elementsPerSection
+			zminmaxRequest.Transform = "min"
+			go processline(min, numSubSections-1, done, zminmaxRequest)
+			zminmaxRequest.Transform = "max"
+			go processline(max, numSubSections-1, done, zminmaxRequest)
+			for i := 0; i < numSubSections*2; i++ {
+				<-done
+			}
+			request.Zmin = floats.Min(min)
+			request.Zmax = floats.Max(max)
+			zminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
+
+		} else { // If file is large and has multiple lines then check the first, last, and a number of middles lines
 			numMiddlesLines := int(math.Max(float64((configuration.MaxBytesZminZmax/request.FileXSize)-2), 0))
 			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed. Number of middle lines:", numMiddlesLines)
 			min := make([]float64, 2+numMiddlesLines)
