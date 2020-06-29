@@ -409,10 +409,10 @@ func BaseicRDSHandlerSubsize(t *testing.T, filename string, x1, y1, x2, y2, outx
 	}
 
 }
-func BaseicRDSxCutHandler(t *testing.T, filename string, x1, y1, x2, y2, outxsize, outzsize int, cxmode string, expectedReturnCode int, expectedReturn []byte) {
+func BaseicRDSxCutHandler(t *testing.T, filename, mode string, x1, y1, x2, y2, outxsize, outzsize int, cxmode string, expectedReturnCode int, expectedReturn []byte) {
 	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
 	locationName := "TestDir"
-	sdsurl := "/sds/rdsxcut/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outzsize) + "/" + locationName + "/" + filename
+	sdsurl := "/sds/" + mode + "/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outzsize) + "/" + locationName + "/" + filename
 	sdsurl = sdsurl + "?cxmode=" + cxmode
 
 	t.Log("url:", sdsurl)
@@ -557,6 +557,9 @@ func make1DExpectedData(mode string, size, line, outxsize, outzsize, zmin, zmax 
 		wholefile = makeLineExpectedData()
 		line = 0
 		size = 500
+	} else if mode == "ycut" {
+		wholefile = makeYcutExpectedData(size, line)
+		line = 0
 	}
 	xslice := make([]int16, 0, size*2)
 	zslice := make([]int16, 0, size*2)
@@ -610,6 +613,23 @@ func makeLineExpectedData() []byte {
 	return expectedReturn
 }
 
+func makeYcutExpectedData(size, line int) []byte {
+	expectedReturn := make([]byte, size)
+
+	var middleValue byte = uint8(line / (size / 10))
+
+	for i := 0; i < 10; i++ {
+		expectedReturn[i] = 0
+	}
+	for i := 10; i < 50; i++ {
+		expectedReturn[i] = middleValue
+	}
+	for i := 50; i < 60; i++ {
+		expectedReturn[i] = 10
+	}
+
+	return expectedReturn
+}
 func TestInvalidTransform(t *testing.T) {
 	// An unknown transform should result in defaulting to "first."
 	expectedReturn := make([]byte, 1)
@@ -1036,22 +1056,45 @@ func TestAverageMiddlePointsBadSubsize2(t *testing.T) { //Badsubsize should be i
 }
 func TestXCutFirstLine(t *testing.T) {
 	expectedResults := make1DExpectedData("xcut", 60, 0, 60, 10, 0, 10)
-	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", 0, 0, 60, 1, 60, 10, "Re", 200, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 1, 60, 10, "Re", 200, expectedResults)
 }
 
 func TestXCutMiddleLine(t *testing.T) {
 	expectedResults := make1DExpectedData("xcut", 60, 30, 60, 10, 0, 10)
-	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", 0, 30, 60, 31, 60, 10, "Re", 200, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 30, 60, 31, 60, 10, "Re", 200, expectedResults)
 }
 
 func TestXCutMiddleLineXCompress(t *testing.T) {
 	expectedResults := make1DExpectedData("xcut", 60, 30, 30, 10, 0, 10)
-	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", 0, 30, 60, 31, 30, 10, "Re", 200, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 30, 60, 31, 30, 10, "Re", 200, expectedResults)
 }
 
 func TestXCutMiddleLineZCompress(t *testing.T) {
 	expectedResults := make1DExpectedData("xcut", 60, 30, 60, 5, 0, 10)
-	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", 0, 30, 60, 31, 60, 5, "Re", 200, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 30, 60, 31, 60, 5, "Re", 200, expectedResults)
+}
+
+func TestYCutFirstLine(t *testing.T) {
+	expectedResults := make1DExpectedData("ycut", 60, 0, 60, 10, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 0, 0, 1, 60, 60, 10, "Re", 200, expectedResults)
+}
+
+func TestYCutMiddleLine(t *testing.T) {
+	expectedResults := make1DExpectedData("ycut", 60, 20, 60, 10, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 20, 0, 21, 60, 60, 10, "Re", 200, expectedResults)
+}
+
+func TestYCutMiddleLine2(t *testing.T) {
+	expectedResults := make1DExpectedData("ycut", 60, 40, 60, 10, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 40, 0, 41, 60, 60, 10, "Re", 200, expectedResults)
+}
+func TestYCutMiddleLineXCompress(t *testing.T) {
+	expectedResults := make1DExpectedData("ycut", 60, 40, 30, 10, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 40, 0, 41, 60, 30, 10, "Re", 200, expectedResults)
+}
+func TestYCutMiddleLineZCompress(t *testing.T) {
+	expectedResults := make1DExpectedData("ycut", 60, 40, 60, 5, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 40, 0, 41, 60, 60, 5, "Re", 200, expectedResults)
 }
 
 func Test1DLine(t *testing.T) {
@@ -1086,4 +1129,51 @@ func Test1DLineXExpansion(t *testing.T) {
 	outysize := 10
 	expectedResults := make1DExpectedData("line", 500, 0, outxsize, outysize, 0, 10)
 	BaseicLDSHandler(t, "stairstep.tmp", 0, 500, outxsize, outysize, "Re", 200, expectedResults)
+}
+
+func TestXCutInvalidRequests(t *testing.T) {
+
+	// Valid Request
+
+	expectedResults := make1DExpectedData("xcut", 60, 0, 60, 10, 0, 10)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 1, 60, 10, "Re", 200, expectedResults)
+
+	// Invalid Requests
+	expectedResults = make([]byte, 0)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", -1, 0, 60, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, -1, 60, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, -1, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, -1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 1, 0, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 1, 60, 0, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 0, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 0, 0, 0, 60, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 60, 2, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsycut", 0, 0, 2, 60, 60, 10, "Re", 400, expectedResults)
+
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 0, 70, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 65, 0, 70, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 55, 0, 70, 1, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 60, 60, 61, 60, 10, "Re", 400, expectedResults)
+	BaseicRDSxCutHandler(t, "mydata_SB_60_60.tmp", "rdsxcut", 0, 62, 60, 63, 60, 10, "Re", 400, expectedResults)
+}
+
+func Test1DLineInvalidRequests(t *testing.T) {
+
+	// Valid Request
+	outxsize := 500
+	outysize := 10
+	expectedResults := make1DExpectedData("line", 500, 0, outxsize, outysize, 0, 10)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, 500, outxsize, outysize, "Re", 200, expectedResults)
+
+	// Invalid Requests
+	expectedResults = make([]byte, 0)
+	BaseicLDSHandler(t, "stairstep.tmp", -1, 500, outxsize, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, -100, outxsize, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, 500, 0, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, 500, outxsize, 0, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, 0, outxsize, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 0, 1000, outxsize, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 400, 600, outxsize, outysize, "Re", 400, expectedResults)
+	BaseicLDSHandler(t, "stairstep.tmp", 1000, 1100, outxsize, outysize, "Re", 400, expectedResults)
 }
