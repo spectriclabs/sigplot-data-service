@@ -124,7 +124,7 @@ func checkCache(cachePath string, every int, maxBytes int64) {
 			if currentBytes > maxBytes {
 				path := fmt.Sprintf("%s%s", cachePath, oldestFile.Name())
 
-				if strings.Contains(oldestFile.Name(), "sds") && strings.Contains(oldestFile.Name(), "rds") {
+				if strings.Contains(oldestFile.Name(), "sds") && (strings.Contains(oldestFile.Name(), "rds") || strings.Contains(oldestFile.Name(), "lds")) {
 					log.Println("Cache over Maximum. Removing Old File", oldestFile.Name())
 					err = os.Remove(path)
 					if err != nil {
