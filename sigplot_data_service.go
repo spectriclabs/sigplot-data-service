@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -26,6 +27,9 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"go.elastic.co/apm"
+	"go.elastic.co/apm/module/apmhttp"
 )
 
 var ioMutex = &sync.Mutex{}
@@ -156,7 +160,9 @@ func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64,
 
 }
 
-func convertFileData(bytesin []byte, file_formatstring string) []float64 {
+func convertFileData(ctx context.Context, bytesin []byte, file_formatstring string) []float64 {
+	span, ctx := apm.StartSpan(ctx, "convertFileData", "convertFileData")
+	defer span.End()
 	var bytes_per_atom int = int(bytesPerAtomMap[string(file_formatstring[1])])
 	//var atoms_in_file int= 1
 	//var num_slice=make([]int8,atoms_in_file)
@@ -296,7 +302,9 @@ func getFileTypeInfo(fileFormat string) (float64, bool) {
 	return bytesPerAtom, complexFlag
 }
 
-func down_sample_line_inx(datain []float64, outxsize int, transform string, outData []float64, outLineNum int) {
+func down_sample_line_inx(ctx context.Context, datain []float64, outxsize int, transform string, outData []float64, outLineNum int) {
+	span, ctx := apm.StartSpan(ctx, "down_sample_line_inx", "down_sample_line_inx")
+	defer span.End()
 	//var inputysize int =len(datain)/framesize
 	var xelementsperoutput float64
 	xelementsperoutput = float64(len(datain)) / float64(outxsize)
@@ -357,8 +365,9 @@ func check(e error) {
 // check(err)
 // num_read,err:=file.Read(out_data)
 
-func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]byte, bool) {
-
+func getBytesFromReader(ctx context.Context, reader io.ReadSeeker, firstByte int, numbytes int) ([]byte, bool) {
+	span, ctx := apm.StartSpan(ctx, "getBytesFromReader", "getBytesFromReader")
+	defer span.End()
 	outData := make([]byte, numbytes)
 	ioMutex.Lock() //Multiple Concurrent goroutines will use this function with the same reader.
 	reader.Seek(int64(firstByte), io.SeekStart)
@@ -373,8 +382,9 @@ func getBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 
 }
 
-func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
-
+func applyCXmode(ctx context.Context, datain []float64, cxmode string, complexData bool) []float64 {
+	span, ctx := apm.StartSpan(ctx, "applyCXmode", "applyCXmode")
+	defer span.End()
 	loThresh := 1.0e-20
 	if complexData {
 		outData := make([]float64, len(datain)/2)
@@ -449,7 +459,10 @@ func applyCXmode(datain []float64, cxmode string, complexData bool) []float64 {
 	}
 }
 
-func processline(outData []float64, outLineNum int, done chan bool, dataRequest rdsRequest) {
+func processline(ctx context.Context, outData []float64, outLineNum int, done chan bool, dataRequest rdsRequest) {
+	span, ctx := apm.StartSpan(ctx, "processline", "processline")
+	defer span.End()
+
 	bytesPerAtom, complexFlag := getFileTypeInfo(dataRequest.FileFormat)
 
 	bytesPerElement := bytesPerAtom
@@ -462,8 +475,9 @@ func processline(outData []float64, outLineNum int, done chan bool, dataRequest 
 
 	bytesLength := float64(dataRequest.Xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
 	bytesLengthInt := int(math.Ceil(bytesLength))
-	filedata, _ := getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
-	dataToProcess := convertFileData(filedata, dataRequest.FileFormat)
+
+	filedata, _ := getBytesFromReader(ctx, dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
+	dataToProcess := convertFileData(ctx, filedata, dataRequest.FileFormat)
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
 	if bytesPerAtom < 1 {
@@ -478,21 +492,24 @@ func processline(outData []float64, outLineNum int, done chan bool, dataRequest 
 
 	var realData []float64
 	if complexFlag {
-		realData = applyCXmode(dataToProcess, dataRequest.Cxmode, true)
+		realData = applyCXmode(ctx, dataToProcess, dataRequest.Cxmode, true)
 	} else {
 		if dataRequest.CxmodeSet {
-			realData = applyCXmode(dataToProcess, dataRequest.Cxmode, false)
+			realData = applyCXmode(ctx, dataToProcess, dataRequest.Cxmode, false)
 		} else {
 			realData = dataToProcess
 		}
 
 	}
 
-	down_sample_line_inx(realData, dataRequest.Outxsize, dataRequest.Transform, outData, outLineNum)
+	down_sample_line_inx(ctx, realData, dataRequest.Outxsize, dataRequest.Transform, outData, outLineNum)
 	done <- true
+
 }
 
-func processRequest(dataRequest rdsRequest) []byte {
+func processRequest(ctx context.Context, dataRequest rdsRequest) []byte {
+	span, ctx := apm.StartSpan(ctx, "processRequest", "processRequest")
+	defer span.End()
 	var processedData []float64
 
 	var yLinesPerOutput float64 = float64(dataRequest.Ysize) / float64(dataRequest.Outysize)
@@ -538,7 +555,7 @@ func processRequest(dataRequest rdsRequest) []byte {
 			var lineRequest rdsRequest
 			lineRequest = dataRequest
 			lineRequest.Ystart = inputLine
-			go processline(xThinData, inputLine-startLine, done, lineRequest)
+			go processline(ctx, xThinData, inputLine-startLine, done, lineRequest)
 
 		}
 		//Wait until all the lines have finished before moving on
@@ -552,7 +569,9 @@ func processRequest(dataRequest rdsRequest) []byte {
 		// 	}
 		// }
 		// Thin in y direction the subsset of lines that have now been processed in x
+		span3, _ := apm.StartSpan(ctx, "downSampleLineInY", "downSampleLineInY")
 		yThinData := downSampleLineInY(xThinData, dataRequest.Outxsize, dataRequest.Transform)
+		span3.End()
 		//log.Println("Thin Y data is currently ", len(yThinData))
 
 		// for i := 0; i < len(yThinData); i++ {
@@ -571,12 +590,13 @@ func processRequest(dataRequest rdsRequest) []byte {
 		// }
 
 	}
-
+	span4, ctx := apm.StartSpan(ctx, "createOutput", "createOutput")
 	outData := createOutput(processedData, dataRequest.OutputFmt, dataRequest.Zmin, dataRequest.Zmax, dataRequest.ColorMap)
+	span4.End()
 	return outData
 }
 
-func processLineRequest(dataRequest rdsRequest, cutType string) []byte {
+func processLineRequest(ctx context.Context, dataRequest rdsRequest, cutType string) []byte {
 	bytesPerAtom, complexFlag := getFileTypeInfo(dataRequest.FileFormat)
 
 	bytesPerElement := bytesPerAtom
@@ -592,8 +612,8 @@ func processLineRequest(dataRequest rdsRequest, cutType string) []byte {
 		firstByteInt := int(math.Floor(firstDataByte))
 		bytesLength := float64(dataRequest.Xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
 		bytesLengthInt := int(math.Ceil(bytesLength))
-		filedata, _ = getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
-		dataToProcess = convertFileData(filedata, dataRequest.FileFormat)
+		filedata, _ = getBytesFromReader(ctx, dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
+		dataToProcess = convertFileData(ctx, filedata, dataRequest.FileFormat)
 		//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
 		if bytesPerAtom < 1 {
 			dataStartBit := int(math.Mod(firstDataByte, 1) * 8)
@@ -615,20 +635,20 @@ func processLineRequest(dataRequest rdsRequest, cutType string) []byte {
 		for row := dataRequest.Ystart; row < (dataRequest.Ystart + dataRequest.Ysize); row++ {
 			dataByte := float64(row*dataRequest.FileXSize+dataRequest.Xstart) * bytesPerElement
 			dataByteInt := int(math.Floor(dataByte))
-			data, _ := getBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+dataByteInt, int(bytesPerElement))
+			data, _ := getBytesFromReader(ctx, dataRequest.Reader, dataRequest.FileDataOffset+dataByteInt, int(bytesPerElement))
 			filedata = append(filedata, data...)
 		}
-		dataToProcess = convertFileData(filedata, dataRequest.FileFormat)
+		dataToProcess = convertFileData(ctx, filedata, dataRequest.FileFormat)
 		log.Println("Got data from file for y cut", len(dataToProcess))
 
 	}
 
 	var realData []float64
 	if complexFlag {
-		realData = applyCXmode(dataToProcess, dataRequest.Cxmode, true)
+		realData = applyCXmode(ctx, dataToProcess, dataRequest.Cxmode, true)
 	} else {
 		if dataRequest.CxmodeSet {
-			realData = applyCXmode(dataToProcess, dataRequest.Cxmode, false)
+			realData = applyCXmode(ctx, dataToProcess, dataRequest.Cxmode, false)
 		} else {
 			realData = dataToProcess
 		}
@@ -829,9 +849,9 @@ func (request *rdsRequest) findZminMax() {
 			for line := 0; line < request.FileYSize; line++ {
 				zminmaxRequest.Ystart = line
 				zminmaxRequest.Transform = "min"
-				go processline(min, line, done, zminmaxRequest)
+				go processline(context.TODO(), min, line, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
-				go processline(max, line, done, zminmaxRequest)
+				go processline(context.TODO(), max, line, done, zminmaxRequest)
 			}
 			for i := 0; i < request.FileYSize*2; i++ {
 				<-done
@@ -853,25 +873,25 @@ func (request *rdsRequest) findZminMax() {
 			// First section of the file
 			zminmaxRequest.Xstart = 0
 			zminmaxRequest.Transform = "min"
-			go processline(min, 0, done, zminmaxRequest)
+			go processline(context.TODO(), min, 0, done, zminmaxRequest)
 			zminmaxRequest.Transform = "max"
-			go processline(max, 0, done, zminmaxRequest)
+			go processline(context.TODO(), max, 0, done, zminmaxRequest)
 			// Middle Sections of the file
 			for section := 1; section < numSubSections-1; section++ {
 				zminmaxRequest.Xstart = section * (elementsPerSection + elementsPerSpace)
 				zminmaxRequest.Transform = "min"
-				go processline(min, section, done, zminmaxRequest)
+				go processline(context.TODO(), min, section, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
-				go processline(max, section, done, zminmaxRequest)
+				go processline(context.TODO(), max, section, done, zminmaxRequest)
 
 			}
 
 			// Last Section of the file
 			zminmaxRequest.Xstart = request.FileXSize - elementsPerSection
 			zminmaxRequest.Transform = "min"
-			go processline(min, numSubSections-1, done, zminmaxRequest)
+			go processline(context.TODO(), min, numSubSections-1, done, zminmaxRequest)
 			zminmaxRequest.Transform = "max"
-			go processline(max, numSubSections-1, done, zminmaxRequest)
+			go processline(context.TODO(), max, numSubSections-1, done, zminmaxRequest)
 			for i := 0; i < numSubSections*2; i++ {
 				<-done
 			}
@@ -889,18 +909,18 @@ func (request *rdsRequest) findZminMax() {
 			// Process Min and Max of first line
 			zminmaxRequest.Ystart = 0
 			zminmaxRequest.Transform = "min"
-			go processline(min, 0, done, zminmaxRequest)
+			go processline(context.TODO(), min, 0, done, zminmaxRequest)
 			zminmaxRequest.Transform = "max"
-			go processline(max, 0, done, zminmaxRequest)
+			go processline(context.TODO(), max, 0, done, zminmaxRequest)
 			numRequested += 2
 
 			//Process Min and Max of last line
 			zminmaxRequest.Ystart = request.FileYSize - 1
 			if zminmaxRequest.Ystart != 0 { // If the last line is the first line, don't do it again.
 				zminmaxRequest.Transform = "min"
-				go processline(min, 1, done, zminmaxRequest)
+				go processline(context.TODO(), min, 1, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
-				go processline(max, 1, done, zminmaxRequest)
+				go processline(context.TODO(), max, 1, done, zminmaxRequest)
 				numRequested += 2
 			}
 
@@ -908,9 +928,9 @@ func (request *rdsRequest) findZminMax() {
 			for i := 0; i < numMiddlesLines; i++ {
 				zminmaxRequest.Ystart = int(((request.FileYSize) / numMiddlesLines) * i)
 				zminmaxRequest.Transform = "min"
-				go processline(min, i+2, done, zminmaxRequest)
+				go processline(context.TODO(), min, i+2, done, zminmaxRequest)
 				zminmaxRequest.Transform = "max"
-				go processline(max, i+2, done, zminmaxRequest)
+				go processline(context.TODO(), max, i+2, done, zminmaxRequest)
 				numRequested += 2
 			}
 			for i := 0; i < numRequested; i++ {
@@ -931,6 +951,8 @@ func (request *rdsRequest) findZminMax() {
 type rdsServer struct{}
 
 func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tx := apm.TransactionFromContext(ctx)
 	var data []byte
 	var inCache bool
 	var ok bool
@@ -995,7 +1017,7 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
-
+	tx.Context.SetLabel("result_in_cache", strconv.FormatBool(inCache))
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 9)
@@ -1053,8 +1075,8 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !rdsRequest.Zset && rdsRequest.OutputFmt == "RGBA" {
 			rdsRequest.findZminMax()
 		}
-
-		data = processRequest(rdsRequest)
+		//ctx := context.TODO()
+		data = processRequest(ctx, rdsRequest)
 		if *useCache {
 			go putItemInCache(cacheFileName, "outputFiles/", data)
 		}
@@ -1084,7 +1106,8 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
 
 	}
-
+	tx.Context.SetLabel("OutputBytes", strconv.FormatInt(int64(len(data)), 10))
+	tx.Context.SetLabel("InputElements", strconv.FormatInt(int64(rdsRequest.Xsize*rdsRequest.Ysize), 10))
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
 
@@ -1129,6 +1152,9 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type rdsTileServer struct{}
 
 func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tx := apm.TransactionFromContext(ctx)
+
 	var data []byte
 	var inCache, ok bool
 
@@ -1195,7 +1221,7 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
-
+	tx.Context.SetLabel("result_in_cache", strconv.FormatBool(inCache))
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		tileRequest.Reader, tileRequest.FileName, ok = openDataSource(r.URL.Path, 9)
@@ -1249,7 +1275,7 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			tileRequest.findZminMax()
 		}
 		// Now that all the parameters have been computed as needed, perform the actual request for data transformation.
-		data = processRequest(tileRequest)
+		data = processRequest(ctx, tileRequest)
 		if *useCache {
 			go putItemInCache(cacheFileName, "outputFiles/", data)
 		}
@@ -1281,7 +1307,8 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Println("Request in cache - returning data from cache")
 	}
-
+	tx.Context.SetLabel("OutputBytes", strconv.FormatInt(int64(len(data)), 10))
+	tx.Context.SetLabel("InputElements", strconv.FormatInt(int64(tileRequest.Xsize*tileRequest.Ysize), 10))
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
 
@@ -1327,6 +1354,8 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type ldsServer struct{}
 
 func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tx := apm.TransactionFromContext(ctx)
 	var data []byte
 	var inCache bool
 	var ok bool
@@ -1385,7 +1414,7 @@ func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
-
+	tx.Context.SetLabel("result_in_cache", strconv.FormatBool(inCache))
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 7)
@@ -1430,7 +1459,7 @@ func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rdsRequest.findZminMax()
 		}
 
-		data = processLineRequest(rdsRequest, "lds")
+		data = processLineRequest(ctx, rdsRequest, "lds")
 
 		if *useCache {
 			go putItemInCache(cacheFileName, "outputFiles/", data)
@@ -1462,6 +1491,8 @@ func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
 
 	}
+	tx.Context.SetLabel("OutputBytes", strconv.FormatInt(int64(len(data)), 10))
+	tx.Context.SetLabel("InputElements", strconv.FormatInt(int64(rdsRequest.Xsize*rdsRequest.Ysize), 10))
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
 
@@ -1508,6 +1539,8 @@ func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type rdsxyCutServer struct{}
 
 func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	tx := apm.TransactionFromContext(ctx)
 	var data []byte
 	var inCache bool
 	var ok bool
@@ -1588,7 +1621,7 @@ func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
-
+	tx.Context.SetLabel("result_in_cache", strconv.FormatBool(inCache))
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 9)
@@ -1648,7 +1681,7 @@ func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rdsRequest.findZminMax()
 		}
 
-		data = processLineRequest(rdsRequest, cutType)
+		data = processLineRequest(ctx, rdsRequest, cutType)
 
 		if *useCache {
 			go putItemInCache(cacheFileName, "outputFiles/", data)
@@ -1680,6 +1713,8 @@ func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		putItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
 
 	}
+	tx.Context.SetLabel("OutputBytes", strconv.FormatInt(int64(len(data)), 10))
+	tx.Context.SetLabel("InputElements", strconv.FormatInt(int64(rdsRequest.Xsize*rdsRequest.Ysize), 10))
 	elapsed := time.Since(start)
 	log.Println("Length of Output Data ", len(data), " processed in: ", elapsed)
 
@@ -1729,6 +1764,8 @@ var useCache = flag.Bool("usecache", true, "Use SDS Cache. Can be disabled for c
 type fileHeaderServer struct{}
 
 func (s *fileHeaderServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	//tx := apm.DefaultTracer.StartTransaction(r.URL.Path, "fileHeaderServer")
+	//defer tx.End()
 
 	log.Println("fileHeaderServer", r.URL.Path)
 	reader, fileName, succeed := openDataSource(r.URL.Path, 3)
@@ -2145,7 +2182,7 @@ func main() {
 	log.Println("Startup Server on Port: ", configuration.Port)
 
 	sdsServer := &routerServer{}
-	http.Handle("/sds/", sdsServer)
+	http.Handle("/sds/", apmhttp.Wrap(sdsServer))
 
 	if uiEnabled {
 		http.Handle("/ui/", http.StripPrefix("/ui/", handleUI(http.FileServer(&UIAssetWrapper{FileSystem: assetFS()}))))
