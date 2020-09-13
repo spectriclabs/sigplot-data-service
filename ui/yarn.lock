@@ -7796,6 +7796,13 @@ lru-cache@^5.1.1:
   dependencies:
     yallist "^3.0.2"
 
+lru@^3.1.0:
+  version "3.1.0"
+  resolved "https://registry.yarnpkg.com/lru/-/lru-3.1.0.tgz#ea7fb8546d83733396a13091d76cfeb4c06837d5"
+  integrity sha1-6n+4VG2DczOWoTCR12z+tMBoN9U=
+  dependencies:
+    inherits "^2.0.1"
+
 magic-string@^0.24.0:
   version "0.24.1"
   resolved "https://registry.yarnpkg.com/magic-string/-/magic-string-0.24.1.tgz#7e38e5f126cae9f15e71f0cf8e450818ca7d5a8f"
@@ -8231,9 +8238,9 @@ no-case@^3.0.3:
     tslib "^1.10.0"
 
 node-fetch@^2.6.0:
-  version "2.6.0"
-  resolved "https://registry.yarnpkg.com/node-fetch/-/node-fetch-2.6.0.tgz#e633456386d4aa55863f676a7ab0daa8fdecb0fd"
-  integrity sha512-8dG4H5ujfvFiqDmVu9fQ5bOHUC15JMjMY/Zumv26oOvvVJjM67KF8koCWIabKQ1GJIa9r2mMZscBq/TbdOcmNA==
+  version "2.6.1"
+  resolved "https://registry.yarnpkg.com/node-fetch/-/node-fetch-2.6.1.tgz#045bd323631f76ed2e2b55573394416b639a0052"
+  integrity sha512-V4aYg89jEoVRxRb2fJdAg8FHvI7cEyYdVAh94HH0UIK8oJxUfkjlDQN9RbMx+bEjP7+ggMiFRprSti032Oipxw==
 
 node-int64@^0.4.0:
   version "0.4.0"
@@ -9047,7 +9054,7 @@ qunit-dom@^1.0.0:
     broccoli-funnel "^3.0.2"
     broccoli-merge-trees "^4.2.0"
 
-qunit@^2.10.0, qunit@^2.9.3:
+qunit@^2.9.3:
   version "2.10.0"
   resolved "https://registry.yarnpkg.com/qunit/-/qunit-2.10.0.tgz#c467b7d558928539a13f8461c4fe41922333ae7b"
   integrity sha512-EP9Q9Kf45z4l/X02ZJtyTQU9DBc82pEWAncSNx7Weo/73BDpX71xqbsdDAQrtEeeilK70cib7CY/lniJV6Cwwg==
@@ -9768,10 +9775,13 @@ signal-exit@^3.0.0, signal-exit@^3.0.2:
   resolved "https://registry.yarnpkg.com/signal-exit/-/signal-exit-3.0.3.tgz#a1410c2edd8f077b08b4e253c8eacfcaf057461c"
   integrity sha512-VUJ49FC8U1OxwZLxIbTTrDvLnf/6TDgxZcK8wxR8zs13xpx7xbG60ndBlhNrFi2EMuFRoeDoJO7wthSLq42EjA==
 
-"sigplot@file:../../sigplot":
+"sigplot@github:spectriclabs/sigplot#feat-sigplot-data-service":
   version "2.0.0-rc17"
+  uid "685c53446a08c8f658717f736afff6f322b52ae1"
+  resolved "https://codeload.github.com/spectriclabs/sigplot/tar.gz/685c53446a08c8f658717f736afff6f322b52ae1"
   dependencies:
     loglevel "^1.4.1"
+    lru "^3.1.0"
     sigfile "^0.1.9"
     spin "0.0.1"
     tinycolor2 "^1.4.1"
