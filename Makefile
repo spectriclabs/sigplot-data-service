@@ -4,7 +4,7 @@ all:
 	go build
 
 ui:
-	@cd ui && npm install
+	@cd ui && yarn install
 	@cd ui && npm run build
 	@go-bindata-assetfs -prefix ui -modtime 1480000000 -tags ui ./ui/dist/...
 
