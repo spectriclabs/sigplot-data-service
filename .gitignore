@@ -1,3 +1,4 @@
 sdscache
 go.sum
 sigplot-data-service
+bindata_assetfs.go
