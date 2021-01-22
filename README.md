@@ -73,12 +73,17 @@ RDS Tiles mode works by thinning the file based on the decimation values provide
 ## Unit Tests
 A series of unit tests are available in `sigplot_data_service_test.go`. To run just type `go test` from the source directory. The unit tests use a few data files are are located in th `/tests/` directory. 
 
+## Building
+
+Uses go1.13
+
 ## UI Development Mode
 
 ```
 cd ui
 nvm use # assumes you have run nvm install at least once
-SDS_URL="http://localhost:5055/sds" ROOT_URL="/ui/" ember serve
+yarn install
+SDS_URL="http://localhost:5055/sds" ROOT_URL="/ui/" ./node_modules/ember-cli/bin/ember serve
 ```
 
 Now you can visit http://localhost:4200/ui/demo.
