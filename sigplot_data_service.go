@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	assetfs "github.com/elazarl/go-bindata-assetfs"
 	"github.com/minio/minio-go/v6"
@@ -2061,19 +2062,22 @@ func setupConfigLogCache() {
 	}
 
 	//Create Directories for Cache if they don't exist
-	ok := createDirectory(configuration.CacheLocation)
-	if !ok {
-		log.Println("Error Creating Cache File Directory ", configuration.CacheLocation)
+	err = os.MkdirAll(configuration.CacheLocation, 0755)
+	if err != nil {
+		log.Println("Error Creating Cache File Directory: ", configuration.CacheLocation, err)
 		return
 	}
-	ok = createDirectory(configuration.CacheLocation + "outputFiles/")
-	if !ok {
-		log.Println("Error Creating Cache File/outputFiles Directory ", configuration.CacheLocation)
+	outputFilesDir := filepath.Join(configuration.CacheLocation, "outputFiles/")
+	err = os.MkdirAll(outputFilesDir, 0755)
+	if err != nil {
+		log.Println("Error Creating Cache File/outputFiles Directory ", configuration.CacheLocation, err)
 		return
 	}
-	ok = createDirectory(configuration.CacheLocation + "miniocache/")
-	if !ok {
-		log.Println("Error Creating Cache File/miniocache Directory ", configuration.CacheLocation)
+
+	miniocache := filepath.Join(configuration.CacheLocation, "miniocache/")
+	err = os.MkdirAll(miniocache, 0755)
+	if err != nil {
+		log.Println("Error Creating Cache File/miniocache Directory ", configuration.CacheLocation, err)
 		return
 	}
 

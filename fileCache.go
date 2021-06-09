@@ -6,53 +6,21 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
-	"path/filepath"
 )
 
-func createDirectory(path string) bool {
-
-	if string(path[len(path)-1]) != "/" {
-		path += "/"
-	}
-	pathData := strings.Split(path, "/")
-	pathUpOne := ""
-	if string(path[0]) == "/" {
-		pathUpOne += "/"
-	}
-	for i := 0; i < (len(pathData) - 2); i++ {
-		pathUpOne += pathData[i]
-		pathUpOne += "/"
-	}
-
-	if _, err := os.Stat(pathUpOne); os.IsNotExist(err) {
-		log.Println("Trying to Create ", path, " but ", pathUpOne, " does not exist")
-		return false
-	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		os.Mkdir(path, 0755)
-		log.Println("Created Directory ", path)
-		return true
-	}
-	return true
-
-}
-
+/// urlToCacheFileName concatenates a `url` and `query`
+/// to form SigPlot Data Services' cached file name.
 func urlToCacheFileName(url string, query string) string {
-
 	response := fmt.Sprintf("%s_%s", url, query)
-	response = strings.ReplaceAll(response, "&", "")
-	response = strings.ReplaceAll(response, "=", "")
-	response = strings.ReplaceAll(response, ".", "")
-	response = strings.ReplaceAll(response, "/", "")
-
-	return response
+	replacer := strings.NewReplacer("&", "", "=", "", ".", "", "/", "")
+	cacheFileName := replacer.Replace(response)
+	return cacheFileName
 }
 
 func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
-	var outData []byte
-
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	outData, err := ioutil.ReadFile(fullPath)
 	if err != nil {
@@ -62,7 +30,6 @@ func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
 }
 
 func getItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool) {
-
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	file, err := os.Open(fullPath)
 	if err != nil {
@@ -73,7 +40,6 @@ func getItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool)
 }
 
 func putItemInCache(cacheFileName string, subDir string, data []byte) {
-
 	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
 	fullPathDirectory := filepath.Dir(fullPath)
 	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
@@ -92,9 +58,7 @@ func putItemInCache(cacheFileName string, subDir string, data []byte) {
 }
 
 func checkCache(cachePath string, every int, maxBytes int64) {
-
 	// duration expressed in nano seconds
-
 	nextRun := time.Now()
 	for {
 		if nextRun.Before(time.Now()) {
