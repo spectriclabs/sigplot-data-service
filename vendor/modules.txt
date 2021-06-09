@@ -1,8 +1,11 @@
 # github.com/elazarl/go-bindata-assetfs v1.0.0
+## explicit
 github.com/elazarl/go-bindata-assetfs
 # github.com/ghodss/yaml v1.0.0
+## explicit
 github.com/ghodss/yaml
 # github.com/minio/minio-go/v6 v6.0.47
+## explicit
 github.com/minio/minio-go/v6
 github.com/minio/minio-go/v6/pkg/credentials
 github.com/minio/minio-go/v6/pkg/encrypt
@@ -14,6 +17,7 @@ github.com/minio/sha256-simd
 # github.com/mitchellh/go-homedir v1.1.0
 github.com/mitchellh/go-homedir
 # github.com/tkanos/gonfig v0.0.0-20181112185242-896f3d81fadf
+## explicit
 github.com/tkanos/gonfig
 # golang.org/x/crypto v0.0.0-20190513172903-22d7a77e9e5f
 golang.org/x/crypto/argon2
@@ -31,6 +35,7 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 # gonum.org/v1/gonum v0.6.2
+## explicit
 gonum.org/v1/gonum/blas
 gonum.org/v1/gonum/blas/blas64
 gonum.org/v1/gonum/blas/cblas128
@@ -50,4 +55,5 @@ gonum.org/v1/gonum/stat
 # gopkg.in/ini.v1 v1.42.0
 gopkg.in/ini.v1
 # gopkg.in/yaml.v2 v2.2.8
+## explicit
 gopkg.in/yaml.v2

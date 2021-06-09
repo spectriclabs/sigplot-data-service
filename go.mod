@@ -1,6 +1,6 @@
 module sigplot-data-service
 
-go 1.13
+go 1.16
 
 require (
 	github.com/elazarl/go-bindata-assetfs v1.0.0
