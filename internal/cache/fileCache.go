@@ -1,7 +1,8 @@
-package main
+package cache
 
 import (
 	"fmt"
+	"github.com/spectriclabs/sigplot-data-service/internal/sds"
 	"io"
 	"io/ioutil"
 	"log"
@@ -11,17 +12,19 @@ import (
 	"time"
 )
 
-/// urlToCacheFileName concatenates a `url` and `query`
-/// to form SigPlot Data Services' cached file name.
-func urlToCacheFileName(url string, query string) string {
+// UrlToCacheFileName concatenates a `url` and `query`
+// to form SigPlot Data Services' cached file name.
+func UrlToCacheFileName(url string, query string) string {
 	response := fmt.Sprintf("%s_%s", url, query)
 	replacer := strings.NewReplacer("&", "", "=", "", ".", "", "/", "")
 	cacheFileName := replacer.Replace(response)
 	return cacheFileName
 }
 
-func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
-	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
+// GetDataFromCache retrieves data from a provided `cacheFileName`
+// within a `subDir` directory
+func GetDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
+	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
 	outData, err := ioutil.ReadFile(fullPath)
 	if err != nil {
 		return outData, false
@@ -29,8 +32,10 @@ func getDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
 	return outData, true
 }
 
-func getItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool) {
-	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
+// GetItemFromCache retrieves a file from a `cacheFileName`
+// within a `subDir` directory and returns an `io.ReadSeeker`
+func GetItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool) {
+	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
 	file, err := os.Open(fullPath)
 	if err != nil {
 		log.Println("Request not in Cache", err)
@@ -39,11 +44,14 @@ func getItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool)
 	return file, true
 }
 
-func putItemInCache(cacheFileName string, subDir string, data []byte) {
-	fullPath := fmt.Sprintf("%s%s%s", configuration.CacheLocation, subDir, cacheFileName)
+// PutItemInCache places `data` into file denoted by `cacheFileName`
+// within `subDir`
+func PutItemInCache(cacheFileName string, subDir string, data []byte) {
+	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
 	fullPathDirectory := filepath.Dir(fullPath)
 	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
-		os.Mkdir(fullPathDirectory, 0755)
+		mkdirErr := os.Mkdir(fullPathDirectory, 0755)
+		log.Println("Error creating cache directory", mkdirErr)
 	}
 	file, err := os.Create(fullPath)
 	if err != nil {
@@ -57,7 +65,9 @@ func putItemInCache(cacheFileName string, subDir string, data []byte) {
 	}
 }
 
-func checkCache(cachePath string, every int, maxBytes int64) {
+// CheckCache runs a check every `checkInterval` seconds
+// and purges if the current cache size exceeds `maxBytes`
+func CheckCache(cachePath string, checkInterval int, maxBytes int64) {
 	// duration expressed in nano seconds
 	nextRun := time.Now()
 	for {
@@ -65,7 +75,7 @@ func checkCache(cachePath string, every int, maxBytes int64) {
 
 			files, err := ioutil.ReadDir(cachePath)
 			if err != nil {
-				log.Println("checkCache Error: ", err)
+				log.Println("CheckCache Error: ", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
@@ -99,7 +109,7 @@ func checkCache(cachePath string, every int, maxBytes int64) {
 				}
 
 			} else {
-				nextRun = nextRun.Add(time.Second * time.Duration(every))
+				nextRun = nextRun.Add(time.Second * time.Duration(checkInterval))
 			}
 		} else {
 			time.Sleep(5 * time.Second)

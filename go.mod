@@ -1,4 +1,4 @@
-module sigplot-data-service
+module github.com/spectriclabs/sigplot-data-service
 
 go 1.16
 
