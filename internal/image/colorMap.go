@@ -5,27 +5,26 @@ import (
 	"math"
 )
 
-type ColorPoint struct {
+type Pixel struct {
 	Position float64
 	Red      float64
 	Green    float64
 	Blue     float64
 }
 
-func MakeColorPalette(controlColors []ColorPoint, numColors int) []ColorPoint {
+func MakeColorPalette(controlColors []Pixel, numColors int) []Pixel {
 	colorsPerPosition := numColors / 100.0
 	lastPoint := controlColors[0]
 
 	// If first control color is not at 0 then copy color for range
 	lastIndexFilled := 0
-	outColors := make([]ColorPoint, numColors)
-	outColors[0] = ColorPoint{
+	outColors := make([]Pixel, numColors)
+	outColors[0] = Pixel{
 		Red:   math.Round(controlColors[0].Red * 255.0 / 100.0),
 		Blue:  math.Round(controlColors[0].Blue * 255.0 / 100.0),
 		Green: math.Round(controlColors[0].Green * 255.0 / 100.0),
 	}
 	for controlColorIndex, controlColor := range controlColors[1:] {
-		//possDiff:=controlColors[controlColorIndex].Position-lastPoint.Position
 		redDiff := (controlColor.Red - lastPoint.Red) * 255.0 / 100
 		greenDiff := (controlColor.Green - lastPoint.Green) * 255.0 / 100
 		blueDiff := (controlColor.Blue - lastPoint.Blue) * 255.0 / 100
@@ -33,7 +32,7 @@ func MakeColorPalette(controlColors []ColorPoint, numColors int) []ColorPoint {
 		endRange := int(math.Round(controlColor.Position * float64(colorsPerPosition)))
 		for j := startRange; j < endRange; j++ {
 			percentRange := (float64(j+1) - float64(startRange)) / float64(endRange-startRange)
-			outColors[j] = ColorPoint{
+			outColors[j] = Pixel{
 				Position: float64(j),
 				Red:      math.Round(percentRange*redDiff + float64(lastPoint.Red)*255.0/100),
 				Green:    math.Round(percentRange*greenDiff + float64(lastPoint.Green)*255.0/100),
@@ -46,16 +45,16 @@ func MakeColorPalette(controlColors []ColorPoint, numColors int) []ColorPoint {
 	return outColors
 }
 
-func GetColorControlPoints(colorMap string) []ColorPoint {
+func GetColorControlPoints(colorMap string) []Pixel {
 	switch colorMap {
 	case "Greyscale":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 0, 0, 0},
 			{60, 50, 50, 50},
 			{100, 100, 100, 100},
 		}
 	case "Ramp Colormap":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 0, 0, 15},
 			{10, 0, 0, 50},
 			{31, 0, 65, 75},
@@ -65,7 +64,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 			{100, 100, 0, 0},
 		}
 	case "Color Wheel":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 100, 100, 0},
 			{20, 0, 80, 40},
 			{30, 0, 100, 100},
@@ -75,7 +74,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 			{100, 100, 100, 0},
 		}
 	case "Spectrum":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 0, 75, 0},
 			{22, 0, 90, 90},
 			{37, 0, 0, 85},
@@ -85,7 +84,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 			{100, 95, 95, 95},
 		}
 	case "calewhite":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 100, 100, 100},
 			{16.666, 0, 0, 100},
 			{33.333, 0, 100, 100},
@@ -95,7 +94,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 			{100, 100, 0, 100},
 		}
 	case "HotDesat":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 27.84, 27.84, 85.88},
 			{14.2857, 0, 0, 35.69},
 			{28.571, 0, 100, 100},
@@ -106,7 +105,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 			{100, 87.84, 29.8, 29.8},
 		}
 	case "Sunset":
-		return []ColorPoint{
+		return []Pixel{
 			{0, 10, 0, 23},
 			{18, 34, 0, 60},
 			{36, 58, 20, 47},
@@ -117,7 +116,7 @@ func GetColorControlPoints(colorMap string) []ColorPoint {
 		}
 	default:
 		log.Println("Unknown Colormap", colorMap, "using default RampColormap")
-		return []ColorPoint{
+		return []Pixel{
 			{0, 0, 0, 15},
 			{10, 0, 0, 50},
 			{31, 0, 65, 75},

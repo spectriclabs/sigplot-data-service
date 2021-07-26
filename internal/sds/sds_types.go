@@ -54,7 +54,7 @@ type RdsRequest struct {
 }
 
 func (request *RdsRequest) ComputeYSize() {
-	request.FileYSize = int(request.FileDataSize/BytesPerAtomMap[string(request.FileFormat[1])]) / (request.FileXSize)
+	request.FileYSize = int(request.FileDataSize/bluefile.BytesPerAtomMap[string(request.FileFormat[1])]) / (request.FileXSize)
 	if string(request.FileFormat[0]) == "C" {
 		request.FileYSize = request.FileYSize / 2
 	}
@@ -71,6 +71,7 @@ func (request *RdsRequest) ComputeTileSizes() {
 	request.Outxsize = request.TileXSize
 	request.Outysize = request.TileYSize
 }
+
 func (request *RdsRequest) ComputeRequestSizes() {
 	request.Ystart = int(math.Min(float64(request.Y1), float64(request.Y2)))
 	request.Xstart = int(math.Min(float64(request.X1), float64(request.X2)))
@@ -153,15 +154,6 @@ var DecimationLookup = map[int]int{
 	8:  128,
 	9:  256,
 	10: 512,
-}
-
-var BytesPerAtomMap = map[string]float64{
-	"P": .125,
-	"B": 1,
-	"I": 2,
-	"L": 4,
-	"F": 4,
-	"D": 8,
 }
 
 type Location struct {

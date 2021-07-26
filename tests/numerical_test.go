@@ -1,10 +1,9 @@
 package main
 
 import (
+	"github.com/spectriclabs/sigplot-data-service/internal/image"
 	"math"
 	"testing"
-
-	"sigplot-data-service/internal/numerical"
 )
 
 func TestSuppressNaN(t *testing.T) {
@@ -70,7 +69,7 @@ func TestTransform(t *testing.T) {
 	}
 
 	for _, exp := range expected {
-		result := numerical.Transform(exp.DataIn, exp.Transform)
+		result := image.Transform(exp.DataIn, exp.Transform)
 		if result != exp.Output {
 			t.Errorf(
 				"Transform(%v, %s) returned %f instead of %f",

@@ -30,7 +30,7 @@ func FSHandler(t *testing.T, locationName string, expectedReturnCode int) []byte
 		t.Fatal(err)
 	}
 
-	setupConfigLogCache()
+	SetupConfigLogCache()
 
 	rr := httptest.NewRecorder()
 	//handler := http.HandlerFunc(fileHeaderServer)

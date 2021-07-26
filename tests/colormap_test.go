@@ -4,56 +4,56 @@ import (
 	"reflect"
 	"testing"
 
-	"sigplot-data-service/internal/image"
+	"github.com/spectriclabs/sigplot-data-service/internal/image"
 )
 
 func TestGetColorControlPoints(t *testing.T) {
 	expected := []struct {
 		Input  string
-		Output []image.ColorPoint
+		Output []image.Pixel
 	}{
 		{
 			Input: "Greyscale",
-			Output: []image.ColorPoint{
-				image.ColorPoint{0, 0, 0, 0},
-				image.ColorPoint{60, 50, 50, 50},
-				image.ColorPoint{100, 100, 100, 100},
+			Output: []image.Pixel{
+				{0, 0, 0, 0},
+				{60, 50, 50, 50},
+				{100, 100, 100, 100},
 			},
 		},
 		{
 			Input: "RampColormap",
-			Output: []image.ColorPoint{
-				image.ColorPoint{0, 0, 0, 15},
-				image.ColorPoint{10, 0, 0, 50},
-				image.ColorPoint{31, 0, 65, 75},
-				image.ColorPoint{50, 0, 80, 0},
-				image.ColorPoint{70, 75, 80, 0},
-				image.ColorPoint{83, 100, 60, 0},
-				image.ColorPoint{100, 100, 0, 0},
+			Output: []image.Pixel{
+				{0, 0, 0, 15},
+				{10, 0, 0, 50},
+				{31, 0, 65, 75},
+				{50, 0, 80, 0},
+				{70, 75, 80, 0},
+				{83, 100, 60, 0},
+				{100, 100, 0, 0},
 			},
 		},
 		{
 			Input: "ColorWheel",
-			Output: []image.ColorPoint{
-				image.ColorPoint{0, 100, 100, 0},
-				image.ColorPoint{20, 0, 80, 40},
-				image.ColorPoint{30, 0, 100, 100},
-				image.ColorPoint{50, 10, 10, 0},
-				image.ColorPoint{65, 100, 0, 0},
-				image.ColorPoint{88, 100, 40, 0},
-				image.ColorPoint{100, 100, 100, 0},
+			Output: []image.Pixel{
+				{0, 100, 100, 0},
+				{20, 0, 80, 40},
+				{30, 0, 100, 100},
+				{50, 10, 10, 0},
+				{65, 100, 0, 0},
+				{88, 100, 40, 0},
+				{100, 100, 100, 0},
 			},
 		},
 		{
 			Input: "Spectrum",
-			Output: []image.ColorPoint{
-				image.ColorPoint{0, 0, 75, 0},
-				image.ColorPoint{22, 0, 90, 90},
-				image.ColorPoint{37, 0, 0, 85},
-				image.ColorPoint{49, 90, 0, 85},
-				image.ColorPoint{68, 90, 0, 0},
-				image.ColorPoint{80, 90, 90, 0},
-				image.ColorPoint{100, 95, 95, 95},
+			Output: []image.Pixel{
+				{0, 0, 75, 0},
+				{22, 0, 90, 90},
+				{37, 0, 0, 85},
+				{49, 90, 0, 85},
+				{68, 90, 0, 0},
+				{80, 90, 90, 0},
+				{100, 95, 95, 95},
 			},
 		},
 	}
@@ -72,21 +72,21 @@ func TestGetColorControlPoints(t *testing.T) {
 
 func TestMakeColorPalette(t *testing.T) {
 	expected := []struct {
-		InputControlColors []image.ColorPoint
+		InputControlColors []image.Pixel
 		InputNumColors     int
-		Output             []image.ColorPoint
+		Output             []image.Pixel
 	}{
 		{
-			InputControlColors: []image.ColorPoint{
-				image.ColorPoint{0, 0, 0, 0},
-				image.ColorPoint{60, 50, 50, 50},
-				image.ColorPoint{100, 100, 100, 100},
+			InputControlColors: []image.Pixel{
+				{0, 0, 0, 0},
+				{60, 50, 50, 50},
+				{100, 100, 100, 100},
 			},
 			InputNumColors: 6,
-			Output: []image.ColorPoint{
-				image.ColorPoint{0, 0, 0, 0},
-				image.ColorPoint{60, 50, 50, 50},
-				image.ColorPoint{100, 100, 100, 100},
+			Output: []image.Pixel{
+				{0, 0, 0, 0},
+				{60, 50, 50, 50},
+				{100, 100, 100, 100},
 			},
 		},
 	}

@@ -12,10 +12,10 @@ import (
 	"time"
 )
 
-// UrlToCacheFileName concatenates a `url` and `query`
+// UrlToCacheFileName uses a url and query string
 // to form SigPlot Data Services' cached file name.
-func UrlToCacheFileName(url string, query string) string {
-	response := fmt.Sprintf("%s_%s", url, query)
+func UrlToCacheFileName(url string) string {
+	response := strings.Replace(url, "?", "_", 1)
 	replacer := strings.NewReplacer("&", "", "=", "", ".", "", "/", "")
 	cacheFileName := replacer.Replace(response)
 	return cacheFileName

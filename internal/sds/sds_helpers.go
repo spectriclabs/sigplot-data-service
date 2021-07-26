@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unsafe"
 )
 
 func GetURLQueryParamFloat(r *http.Request, keyname string) (float64, bool) {
@@ -83,64 +82,6 @@ func GetBytesFromReader(reader io.ReadSeeker, firstByte int, numbytes int) ([]by
 	return outData, true
 }
 
-func ConvertFileData(bytesin []byte, fileFormat string) []float64 {
-	bytesPerAtom := int(BytesPerAtomMap[string(fileFormat[1])])
-	var outData []float64
-	switch string(fileFormat[1]) {
-
-	case "B":
-		atomsInFile := len(bytesin) / bytesPerAtom
-		outData = make([]float64, atomsInFile)
-		for i := 0; i < atomsInFile; i++ {
-			num := *(*int8)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
-			outData[i] = float64(num)
-		}
-	case "I":
-		atomsInFile := len(bytesin) / bytesPerAtom
-		outData = make([]float64, atomsInFile)
-		for i := 0; i < atomsInFile; i++ {
-			num := *(*int16)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
-			outData[i] = float64(num)
-		}
-	case "L":
-		atomsInFile := len(bytesin) / bytesPerAtom
-		outData = make([]float64, atomsInFile)
-		for i := 0; i < atomsInFile; i++ {
-			num := *(*int32)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
-			outData[i] = float64(num)
-		}
-	case "F":
-		atomsInFile := len(bytesin) / bytesPerAtom
-		outData = make([]float64, atomsInFile)
-		for i := 0; i < atomsInFile; i++ {
-			num := *(*float32)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
-			outData[i] = float64(num)
-		}
-	case "D":
-		atomsInFile := len(bytesin) / bytesPerAtom
-		outData = make([]float64, atomsInFile)
-		for i := 0; i < atomsInFile; i++ {
-			num := *(*float64)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
-			outData[i] = num
-		}
-	case "P":
-		// Case for Packed Data. Read in as uint8, then create 8 floats from that.
-		bytesInFile := len(bytesin)
-		outData = make([]float64, bytesInFile*8)
-		for i := 0; i < bytesInFile; i++ {
-			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
-			for j := 0; j < 8; j++ {
-				outData[i*8+j] = float64((num & 0x80) >> 7)
-				num = num << 1 // left shift to look at next bit
-			}
-		}
-
-	}
-	//log.Println("outData" , len(outData))
-	return outData
-
-}
-
 func ProcessLine(outData []float64, outLineNum int, done chan bool, dataRequest RdsRequest) {
 	bytesPerAtom, complexFlag := bluefile.GetFileTypeInfo(dataRequest.FileFormat)
 
@@ -155,7 +96,7 @@ func ProcessLine(outData []float64, outLineNum int, done chan bool, dataRequest 
 	bytesLength := float64(dataRequest.Xsize)*bytesPerElement + (firstDataByte - float64(firstByteInt))
 	bytesLengthInt := int(math.Ceil(bytesLength))
 	filedata, _ := GetBytesFromReader(dataRequest.Reader, dataRequest.FileDataOffset+firstByteInt, bytesLengthInt)
-	dataToProcess := ConvertFileData(filedata, dataRequest.FileFormat)
+	dataToProcess := bluefile.ConvertFileData(filedata, dataRequest.FileFormat)
 
 	//If the data is SP then we might have processed a few more bits than we actually needed on both sides, so reassign data_to_process to correctly point to the numbers of interest
 	if bytesPerAtom < 1 {

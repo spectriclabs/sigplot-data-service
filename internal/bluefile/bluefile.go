@@ -1,5 +1,7 @@
 package bluefile
 
+import "unsafe"
+
 type BlueHeader struct {
 	Version   [4]byte    // Header Version
 	HeadRep   [4]byte    // Header representation
@@ -65,12 +67,18 @@ type BlueHeaderShortenedFields struct {
 	Size      int     `json:"size"`       // number of elements in dview
 }
 
+var BytesPerAtomMap = map[string]float64{
+	"P": .125,
+	"B": 1,
+	"I": 2,
+	"L": 4,
+	"F": 4,
+	"D": 8,
+}
+
 func GetFileTypeInfo(fileFormat string) (float64, bool) {
-	complexFlag := false
 	var bytesPerAtom float64 = 1
-	if string(fileFormat[0]) == "C" {
-		complexFlag = true
-	}
+	complexFlag := string(fileFormat[0]) == "C"
 	switch string(fileFormat[1]) {
 	case "B":
 		bytesPerAtom = 1
@@ -85,6 +93,59 @@ func GetFileTypeInfo(fileFormat string) (float64, bool) {
 	case "P":
 		bytesPerAtom = 0.125
 	}
-
 	return bytesPerAtom, complexFlag
+}
+
+func ConvertFileData(bytesin []byte, fileFormat string) []float64 {
+	bytesPerAtom := int(BytesPerAtomMap[string(fileFormat[1])])
+	var outData []float64
+	switch string(fileFormat[1]) {
+	case "B":
+		atomsInFile := len(bytesin) / bytesPerAtom
+		outData = make([]float64, atomsInFile)
+		for i := 0; i < atomsInFile; i++ {
+			num := *(*int8)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
+			outData[i] = float64(num)
+		}
+	case "I":
+		atomsInFile := len(bytesin) / bytesPerAtom
+		outData = make([]float64, atomsInFile)
+		for i := 0; i < atomsInFile; i++ {
+			num := *(*int16)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
+			outData[i] = float64(num)
+		}
+	case "L":
+		atomsInFile := len(bytesin) / bytesPerAtom
+		outData = make([]float64, atomsInFile)
+		for i := 0; i < atomsInFile; i++ {
+			num := *(*int32)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
+			outData[i] = float64(num)
+		}
+	case "F":
+		atomsInFile := len(bytesin) / bytesPerAtom
+		outData = make([]float64, atomsInFile)
+		for i := 0; i < atomsInFile; i++ {
+			num := *(*float32)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
+			outData[i] = float64(num)
+		}
+	case "D":
+		atomsInFile := len(bytesin) / bytesPerAtom
+		outData = make([]float64, atomsInFile)
+		for i := 0; i < atomsInFile; i++ {
+			num := *(*float64)(unsafe.Pointer(&bytesin[i*bytesPerAtom]))
+			outData[i] = num
+		}
+	case "P":
+		// Case for Packed Data. Read in as uint8, then create 8 floats from that.
+		bytesInFile := len(bytesin)
+		outData = make([]float64, bytesInFile*8)
+		for i := 0; i < bytesInFile; i++ {
+			num := *(*uint8)(unsafe.Pointer(&bytesin[i]))
+			for j := 0; j < 8; j++ {
+				outData[i*8+j] = float64((num & 0x80) >> 7)
+				num = num << 1 // left shift to look at next bit
+			}
+		}
+	}
+	return outData
 }

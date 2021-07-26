@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"sigplot-data-service/internal/cache"
+	"github.com/spectriclabs/sigplot-data-service/internal/cache"
 )
 
 func TestUrlToCacheFileName(t *testing.T) {
@@ -30,7 +30,6 @@ func TestUrlToCacheFileName(t *testing.T) {
 
 	for _, exp := range expected {
 		result := cache.UrlToCacheFileName(
-			exp.InputFileLocation,
 			exp.InputFileName,
 			exp.InputQuery,
 		)
