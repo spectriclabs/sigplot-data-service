@@ -646,7 +646,7 @@ func GetRDSTile(c echo.Context) error {
 		fileMDataJSON, marshalError := json.Marshal(fileMData)
 		if marshalError != nil {
 			c.Logger().Error(marshalError)
-			return c.String(http.StatusInternalServerError, marshalError.Error())
+			return marshalError
 		}
 		cache.PutItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
 	} else {
@@ -654,20 +654,20 @@ func GetRDSTile(c echo.Context) error {
 	}
 
 	elapsed := time.Since(start)
-	c.Logger().Info("Length of Output Data ", len(data), " processed in: ", elapsed)
+	c.Logger().Infof("Length of Output Data %d processed in %lf sec", len(data), elapsed)
 
 	// Get the metadata for this request to put into the return header.
 	fileMetaDataJSON, metaInCache := cache.GetDataFromCache(cacheFileName+"meta", "outputFiles/")
 	if !metaInCache {
 		err = fmt.Errorf("error reading the metadata file from cache")
 		c.Logger().Error(err)
-		return c.String(http.StatusInternalServerError, err.Error())
+		return err
 	}
 	var fileMDataCache sds.FileMetaData
 	marshalError := json.Unmarshal(fileMetaDataJSON, &fileMDataCache)
 	if marshalError != nil {
 		c.Logger().Error(marshalError)
-		return c.String(http.StatusInternalServerError, marshalError.Error())
+		return marshalError
 	}
 
 	// Create a Return header with some metadata in it.
