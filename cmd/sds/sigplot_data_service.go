@@ -6,11 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/spectriclabs/sigplot-data-service/internal/bluefile"
-	"github.com/spectriclabs/sigplot-data-service/internal/cache"
-	"github.com/spectriclabs/sigplot-data-service/internal/image"
-	"github.com/spectriclabs/sigplot-data-service/internal/sds"
-	"github.com/spectriclabs/sigplot-data-service/ui"
 	"io"
 	"io/ioutil"
 	"log"
@@ -19,6 +14,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/spectriclabs/sigplot-data-service/internal/bluefile"
+	"github.com/spectriclabs/sigplot-data-service/internal/cache"
+	"github.com/spectriclabs/sigplot-data-service/internal/image"
+	"github.com/spectriclabs/sigplot-data-service/internal/sds"
+	"github.com/spectriclabs/sigplot-data-service/ui"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -505,37 +506,31 @@ func GetRDSTile(c echo.Context) error {
 	tileRequest.TileXSize, err = strconv.Atoi(c.Param("tileXsize"))
 	if err != nil || !sds.IntInSlice(tileRequest.TileXSize, allowedTileSizes[:]) {
 		err := fmt.Errorf("tileXSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize)
-		c.Logger().Error(err)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 	tileRequest.TileYSize, err = strconv.Atoi(c.Param("tileYsize"))
 	if err != nil || !sds.IntInSlice(tileRequest.TileYSize, allowedTileSizes[:]) {
 		err := fmt.Errorf("tileYSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize)
-		c.Logger().Error(err)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 	tileRequest.DecXMode, err = strconv.Atoi(c.Param("decXmode"))
 	if err != nil || tileRequest.DecXMode < 0 || tileRequest.DecXMode > 10 {
 		err := fmt.Errorf("decXMode Bad or out of range 0 to 10. got: %d", tileRequest.DecXMode)
-		c.Logger().Error(err)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 	tileRequest.DecYMode, err = strconv.Atoi(c.Param("decYmode"))
 	if err != nil || tileRequest.DecYMode < 0 || tileRequest.DecYMode > 10 {
-		log.Println("decYMode Bad or out of range 0 to 10. got:", tileRequest.DecYMode)
-		c.Logger().Error(err)
+		err := fmt.Errorf("decYMode Bad or out of range 0 to 10. got: %d", tileRequest.DecYMode)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 	tileRequest.TileX, err = strconv.Atoi(c.Param("tileX"))
 	if err != nil || tileRequest.TileX < 0 {
 		err := fmt.Errorf("tileX must be great than zero")
-		c.Logger().Error(err)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 	tileRequest.TileY, err = strconv.Atoi(c.Param("tileY"))
 	if err != nil || tileRequest.TileY < 0 {
 		err := fmt.Errorf("tileY must be great than zero")
-		c.Logger().Error(err)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 
@@ -544,8 +539,7 @@ func GetRDSTile(c echo.Context) error {
 	tileRequest.ComputeTileSizes()
 
 	if tileRequest.Xsize < 1 || tileRequest.Ysize < 1 {
-		err = fmt.Errorf("bad Xsize or ysize. xsize: %d, ysize: %d", tileRequest.Xsize, tileRequest.Ysize)
-		return err
+		return fmt.Errorf("bad Xsize or ysize. xsize: %d, ysize: %d", tileRequest.Xsize, tileRequest.Ysize)
 	}
 
 	c.Logger().Infof(
@@ -573,7 +567,6 @@ func GetRDSTile(c echo.Context) error {
 		tileRequest.FileName = c.Param("*")
 		tileRequest.Reader, err = openDataSource(locationName, tileRequest.FileName)
 		if err != nil {
-			c.Logger().Error(err)
 			return err
 		}
 
@@ -586,20 +579,17 @@ func GetRDSTile(c echo.Context) error {
 			} else {
 				if tileRequest.FileType == 1000 {
 					err = fmt.Errorf("for type 1000 files, a subsize needs to be set")
-					c.Logger().Error(err)
 					return c.String(http.StatusBadRequest, err.Error())
 				}
 			}
 			tileRequest.ComputeYSize()
 		} else {
 			err = fmt.Errorf("invalid File Type")
-			c.Logger().Error(err)
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
 		if tileRequest.Xstart >= tileRequest.FileXSize || tileRequest.Ystart >= tileRequest.FileYSize {
 			err = fmt.Errorf("invalid tile request: xstart=%d, filexsize=%d, ystart=%d, fileysize=%d", tileRequest.Xstart, tileRequest.FileXSize, tileRequest.Ystart, tileRequest.FileYSize)
-			c.Logger().Error(err)
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
@@ -613,7 +603,6 @@ func GetRDSTile(c echo.Context) error {
 		}
 		if tileRequest.Xsize > tileRequest.FileXSize {
 			err = fmt.Errorf("invalid Request. Requested X size greater than file X size")
-			c.Logger().Error(err)
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
@@ -645,7 +634,6 @@ func GetRDSTile(c echo.Context) error {
 
 		fileMDataJSON, marshalError := json.Marshal(fileMData)
 		if marshalError != nil {
-			c.Logger().Error(marshalError)
 			return marshalError
 		}
 		cache.PutItemInCache(cacheFileName+"meta", "outputFiles/", fileMDataJSON)
@@ -659,14 +647,11 @@ func GetRDSTile(c echo.Context) error {
 	// Get the metadata for this request to put into the return header.
 	fileMetaDataJSON, metaInCache := cache.GetDataFromCache(cacheFileName+"meta", "outputFiles/")
 	if !metaInCache {
-		err = fmt.Errorf("error reading the metadata file from cache")
-		c.Logger().Error(err)
-		return err
+		return fmt.Errorf("error reading the metadata file from cache")
 	}
 	var fileMDataCache sds.FileMetaData
 	marshalError := json.Unmarshal(fileMetaDataJSON, &fileMDataCache)
 	if marshalError != nil {
-		c.Logger().Error(marshalError)
 		return marshalError
 	}
 
@@ -1295,10 +1280,10 @@ func SetupServer() *echo.Echo {
 	e.GET("/sds/fs", GetFileLocations)
 	e.GET("/sds/fs/:location/*", GetFileOrDirectory)
 	e.GET("/sds/hdr/:location/*", GetBluefileHeader)
-	e.GET("/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/*", GetRDSTile)
-	// e.GET("/sds/rdsxcut/:x1/:y1/:x2/:y2/:outxsize/:outysize", GetRDSXYCut)
-	// e.GET("/sds/rdsycut/:x1/:y1/:x2/:y2/:outxsize/:outysize", GetRDSXYCut)
-	// e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize", GetLDS)
+	e.GET("/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/:location/*", GetRDSTile)
+	// e.GET("/sds/rdsxcut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", GetRDSXYCut)
+	// e.GET("/sds/rdsycut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", GetRDSXYCut)
+	// e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize/:location/*", GetLDS)
 
 	// Setup SigPlot Data Service UI route
 	webappFS := http.FileServer(ui.GetFileSystem())
