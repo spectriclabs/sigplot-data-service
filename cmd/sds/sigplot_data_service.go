@@ -629,18 +629,18 @@ func GetRDSTile(c echo.Context) error {
 
 		// Store MetaData of request off in cache
 		fileMData := sds.FileMetaData{
-			Outxsize: tileRequest.Outxsize,
-			Outysize: tileRequest.Outysize,
+			Outxsize:   tileRequest.Outxsize,
+			Outysize:   tileRequest.Outysize,
 			Filexstart: tileRequest.Filexstart,
 			Filexdelta: tileRequest.Filexdelta,
 			Fileystart: tileRequest.Fileystart,
 			Fileydelta: tileRequest.Fileydelta,
-			Xstart: tileRequest.Xstart,
-			Ystart: tileRequest.Ystart,
-			Xsize: tileRequest.Xsize,
-			Ysize: tileRequest.Ysize,
-			Zmin: tileRequest.Zmin,
-			Zmax: tileRequest.Zmax,
+			Xstart:     tileRequest.Xstart,
+			Ystart:     tileRequest.Ystart,
+			Xsize:      tileRequest.Xsize,
+			Ysize:      tileRequest.Ysize,
+			Zmin:       tileRequest.Zmin,
+			Zmax:       tileRequest.Zmax,
 		}
 
 		fileMDataJSON, marshalError := json.Marshal(fileMData)
