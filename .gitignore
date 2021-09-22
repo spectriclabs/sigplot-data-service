@@ -1,8 +1,7 @@
 # SDS-specific
 sdscache
 go.sum
-sigplot-data-service
-bindata_assetfs.go
+sigplot_data_service
 
 .idea
 
