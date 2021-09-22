@@ -19,38 +19,46 @@ type Zminzmax struct {
 }
 
 type RdsRequest struct {
-	TileRequest                                            bool
-	FileFormat                                             string
-	FileName                                               string
-	FileType, FileSubsize                                  int
-	FileXSize, FileYSize                                   int
-	FileDataSize                                           float64
-	FileDataOffset                                         int
-	TileXSize, TileYSize, DecXMode, DecYMode, TileX, TileY int
-	DecX, DecY                                             int
-	Zset                                                   bool
-	Subsize                                                int
-	SubsizeSet                                             bool
-	Transform                                              string
-	ColorMap                                               string
-	Reader                                                 io.ReadSeeker
-	Cxmode                                                 string
-	CxmodeSet                                              bool
-	OutputFmt                                              string
-	Outxsize                                               int     `json:"outxsize"`
-	Outysize                                               int     `json:"outysize"`
-	Outzsize                                               int     `json:"outzsize"`
-	Zmin                                                   float64 `json:"zmin"`
-	Zmax                                                   float64 `json:"zmax"`
-	Filexstart                                             float64 `json:"filexstart"`
-	Filexdelta                                             float64 `json:"filexdelta"`
-	Fileystart                                             float64 `json:"fileystart"`
-	Fileydelta                                             float64 `json:"fileydelta"`
-	Xstart                                                 int     `json:"xstart"`
-	Xsize                                                  int     `json:"xsize"`
-	Ystart                                                 int     `json:"ystart"`
-	Ysize                                                  int     `json:"ysize"`
-	X1, X2, Y1, Y2                                         int
+	TileRequest    bool
+	FileFormat     string
+	FileName       string
+	FileType       int
+	FileSubsize    int
+	FileXSize      int
+	FileYSize      int
+	FileDataSize   float64
+	FileDataOffset int
+	TileXSize      int `param:"tileXsize"`
+	TileYSize      int `param:"tileYsize"`
+	DecXMode       int `param:"decXmode"`
+	DecYMode       int `param:"dexYmode"`
+	TileX          int `param:"tileX"`
+	TileY          int `param:"tileY"`
+	DecX           int
+	DecY           int
+	Zset           bool
+	Subsize        int `query:"subsize,omitempty"`
+	SubsizeSet     bool
+	Transform      string `query:"transform"`
+	ColorMap       string `query:"colormap,omitempty"`
+	Reader         io.ReadSeeker
+	Cxmode         string `query:"cxmode,omitempty"`
+	CxmodeSet      bool
+	OutputFmt      string  `query:"outfmt,omitempty"`
+	Outxsize       int     `json:"outxsize"`
+	Outysize       int     `json:"outysize"`
+	Outzsize       int     `json:"outzsize"`
+	Zmin           float64 `json:"zmin" query:"zmin,omitempty"`
+	Zmax           float64 `json:"zmax" query:"zmax,omitempty"`
+	Filexstart     float64 `json:"filexstart"`
+	Filexdelta     float64 `json:"filexdelta"`
+	Fileystart     float64 `json:"fileystart"`
+	Fileydelta     float64 `json:"fileydelta"`
+	Xstart         int     `json:"xstart"`
+	Xsize          int     `json:"xsize"`
+	Ystart         int     `json:"ystart"`
+	Ysize          int     `json:"ysize"`
+	X1, X2, Y1, Y2 int
 }
 
 func (request *RdsRequest) ComputeYSize() {

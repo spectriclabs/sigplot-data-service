@@ -493,48 +493,49 @@ type rdsServer struct{}
 func GetRDSTile(c echo.Context) error {
 	var data []byte
 	var inCache bool
+	var err error
 
 	tileRequest := sds.RdsRequest{
 		TileRequest: true,
 	}
 
-	var err error
+	if err = c.Bind(tileRequest); err != nil {
+		return err
+	}
 
 	// Extract URL Parameters
 	// URL form: /sds/rdstile/tileXSize/tileYSize/decxMode/decYMode/tileX/tileY/locationName
 	allowedTileSizes := [5]int{100, 200, 300, 400, 500}
-	tileRequest.TileXSize, err = strconv.Atoi(c.Param("tileXsize"))
-	if err != nil || !sds.IntInSlice(tileRequest.TileXSize, allowedTileSizes[:]) {
-		err := fmt.Errorf("tileXSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize)
-		return c.String(http.StatusBadRequest, err.Error())
+	if !sds.IntInSlice(tileRequest.TileXSize, allowedTileSizes[:]) {
+		return c.String(
+			http.StatusBadRequest,
+			fmt.Sprintf("tileXSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize),
+		)
 	}
-	tileRequest.TileYSize, err = strconv.Atoi(c.Param("tileYsize"))
-	if err != nil || !sds.IntInSlice(tileRequest.TileYSize, allowedTileSizes[:]) {
-		err := fmt.Errorf("tileYSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize)
-		return c.String(http.StatusBadRequest, err.Error())
+	if !sds.IntInSlice(tileRequest.TileYSize, allowedTileSizes[:]) {
+		return c.String(
+			http.StatusBadRequest,
+			fmt.Sprintf("tileYSize must be one of {100, 200, 300, 400, 500}; given %d", tileRequest.TileXSize),
+		)
 	}
-	tileRequest.DecXMode, err = strconv.Atoi(c.Param("decXmode"))
-	if err != nil || tileRequest.DecXMode < 0 || tileRequest.DecXMode > 10 {
-		err := fmt.Errorf("decXMode Bad or out of range 0 to 10. got: %d", tileRequest.DecXMode)
-		return c.String(http.StatusBadRequest, err.Error())
+	if tileRequest.DecXMode < 0 || tileRequest.DecXMode > 10 {
+		return c.String(
+			http.StatusBadRequest,
+			fmt.Sprintf("decXMode Bad or out of range 0 to 10. got: %d", tileRequest.DecXMode),
+		)
 	}
-	tileRequest.DecYMode, err = strconv.Atoi(c.Param("decYmode"))
-	if err != nil || tileRequest.DecYMode < 0 || tileRequest.DecYMode > 10 {
-		err := fmt.Errorf("decYMode Bad or out of range 0 to 10. got: %d", tileRequest.DecYMode)
-		return c.String(http.StatusBadRequest, err.Error())
+	if tileRequest.DecYMode < 0 || tileRequest.DecYMode > 10 {
+		return c.String(
+			http.StatusBadRequest,
+			fmt.Sprintf("decYMode Bad or out of range 0 to 10. got: %d", tileRequest.DecYMode),
+		)
 	}
-	tileRequest.TileX, err = strconv.Atoi(c.Param("tileX"))
-	if err != nil || tileRequest.TileX < 0 {
-		err := fmt.Errorf("tileX must be great than zero")
-		return c.String(http.StatusBadRequest, err.Error())
+	if tileRequest.TileX < 0 {
+		return c.String(http.StatusBadRequest, fmt.Sprintf("tileX must be great than zero"))
 	}
-	tileRequest.TileY, err = strconv.Atoi(c.Param("tileY"))
-	if err != nil || tileRequest.TileY < 0 {
-		err := fmt.Errorf("tileY must be great than zero")
-		return c.String(http.StatusBadRequest, err.Error())
+	if tileRequest.TileY < 0 {
+		return c.String(http.StatusBadRequest, fmt.Sprintf("tileY must be great than zero"))
 	}
-
-	tileRequest.GetQueryParams(r)
 
 	tileRequest.ComputeTileSizes()
 
@@ -572,14 +573,11 @@ func GetRDSTile(c echo.Context) error {
 
 		if strings.Contains(tileRequest.FileName, ".tmp") || strings.Contains(tileRequest.FileName, ".prm") {
 			tileRequest.ProcessBlueFileHeader()
-
 			if tileRequest.SubsizeSet {
 				tileRequest.FileXSize = tileRequest.Subsize
-
 			} else {
 				if tileRequest.FileType == 1000 {
-					err = fmt.Errorf("for type 1000 files, a subsize needs to be set")
-					return c.String(http.StatusBadRequest, err.Error())
+					return c.String(http.StatusBadRequest, "for type 1000 files, a subsize needs to be set")
 				}
 			}
 			tileRequest.ComputeYSize()
@@ -606,11 +604,12 @@ func GetRDSTile(c echo.Context) error {
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
-		//If Zmin and Zmax were not explitily given then compute
-		if !tileRequest.Zset {
+		//If Zmin and Zmax were not explicitly given then compute
+		if tileRequest.Zmin == 0 && tileRequest.Zmax == 0 {
 			tileRequest.FindZminMax()
 		}
-		// Now that all the parameters have been computed as needed, perform the actual request for data transformation.
+		// Now that all the parameters have been computed as needed,
+		// perform the actual request for data transformation.
 		data = ProcessRequest(tileRequest)
 		if *useCache {
 			go cache.PutItemInCache(cacheFileName, "outputFiles/", data)
@@ -1228,18 +1227,7 @@ func SetupConfigLogCache() {
 		return
 	}
 
-	if sds.Config.Logfile != "" {
-		// Open and setup log file
-		logFile, err := os.OpenFile(sds.Config.Logfile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Println("Error Reading logfile: ", sds.Config.Logfile, err)
-			return
-		}
-		log.SetOutput(logFile)
-		log.SetFlags(log.LstdFlags | log.Lshortfile)
-	}
-
-	//Create Directories for Cache if they don't exist
+	// Create Directories for Cache if they don't exist
 	err = os.MkdirAll(sds.Config.CacheLocation, 0755)
 	if err != nil {
 		log.Println("Error Creating Cache File Directory: ", sds.Config.CacheLocation, err)
@@ -1280,7 +1268,10 @@ func SetupServer() *echo.Echo {
 	e.GET("/sds/fs", GetFileLocations)
 	e.GET("/sds/fs/:location/*", GetFileOrDirectory)
 	e.GET("/sds/hdr/:location/*", GetBluefileHeader)
-	e.GET("/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/:location/*", GetRDSTile)
+	e.GET(
+		"/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/:location/*",
+		GetRDSTile,
+	)
 	// e.GET("/sds/rdsxcut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", GetRDSXYCut)
 	// e.GET("/sds/rdsycut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", GetRDSXYCut)
 	// e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize/:location/*", GetLDS)
@@ -1296,7 +1287,6 @@ func SetupServer() *echo.Echo {
 	return e
 }
 
-var cpuprofile = flag.String("cpuprofile", "", "write CPU profile to file")
 var configFile = flag.String("config", "./sdsConfig.json", "Location of Config File")
 var useCache = flag.Bool("usecache", true, "Use SDS Cache. Can be disabled for certain cases like testing.")
 
