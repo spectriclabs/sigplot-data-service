@@ -1,15 +1,16 @@
-.PHONY: ui docker release
+GOCMD=CGO_ENABLED=0 go
+GOFLAGS=-a -ldflags '-w -extldflags "-static"' -mod vendor
 
-all:
-	go build
+.PHONY: ui docker sds
+
+all: ui sds
 
 ui:
-	@cd ui && yarn install
-	@cd ui && npm run build
-	@go-bindata-assetfs -prefix ui -modtime 1480000000 -tags ui ./ui/dist/...
+	npm --prefix ./ui/webapp install
+	npm --prefix ./ui/webapp run build
 
-release: ui
-	go build -tags ui
+sds:
+	$(GOCMD) build $(GOFLAGS) cmd/sds/sigplot_data_service.go
 
 docker:
 	docker build -t sds:0.7 .
