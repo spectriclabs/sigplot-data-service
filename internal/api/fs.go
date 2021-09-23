@@ -20,18 +20,16 @@ func (a *API) GetBluefileHeader(c echo.Context) error {
 	locationName := c.Param("location")
 	reader, err := sds.OpenDataSource(a.Cfg, a.Cache, locationName, filePath)
 	if err != nil {
-		c.Logger().Error(err)
-		return c.String(http.StatusInternalServerError, err.Error())
+		return err
 	}
 
-	var bluefileheader bluefile.BlueHeader
 	if strings.Contains(filePath, ".tmp") || strings.Contains(filePath, ".prm") {
 		c.Logger().Infof("Opening %s for file header mode", filePath)
 
+		var bluefileheader bluefile.BlueHeader
 		err := binary.Read(reader, binary.LittleEndian, &bluefileheader)
 		if err != nil {
-			c.Logger().Error(err)
-			return c.String(http.StatusInternalServerError, err.Error())
+			return err
 		}
 
 		blueShort := bluefile.BlueHeaderShortenedFields{
@@ -72,7 +70,7 @@ func (a *API) GetBluefileHeader(c echo.Context) error {
 
 		return c.JSON(http.StatusOK, blueShort)
 	} else {
-		err := fmt.Errorf("can only Return Headers for bluefiles (.tmp or .prm)")
+		err := fmt.Errorf("can only return headers for bluefiles (.tmp or .prm)")
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 }
@@ -122,18 +120,25 @@ func (a *API) GetFileOrDirectory(c echo.Context) error {
 	filePath := c.Param("*")
 	locationName := c.Param("location")
 
-	fmt.Println(filePath, locationName)
+	// Find the configured location corresponding
+	// to `locationName`
 	var currentLocation config.Location
 	for i := range a.Cfg.LocationDetails {
 		if a.Cfg.LocationDetails[i].LocationName == locationName {
+			c.Logger().Debugf(
+				"Found location %s in configured locations",
+				locationName,
+			)
 			currentLocation = a.Cfg.LocationDetails[i]
 		}
 	}
+
 	if currentLocation.LocationName != locationName {
 		err := fmt.Errorf("couldn't find location %s", locationName)
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 
+	// TODO: Add support for listing contents of MinIO bucket?
 	if currentLocation.LocationType != "localFile" {
 		err := fmt.Errorf("listing files only supported for localFile location types: %s provided", currentLocation.LocationType)
 		return c.String(http.StatusBadRequest, err.Error())
