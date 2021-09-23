@@ -4,6 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"time"
+
 	"github.com/labstack/echo-contrib/prometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -13,13 +21,6 @@ import (
 	"github.com/spectriclabs/sigplot-data-service/internal/sds"
 	"github.com/spectriclabs/sigplot-data-service/ui"
 	"github.com/spf13/pflag"
-	"io/ioutil"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"path/filepath"
-	"time"
 )
 
 func Run() {
@@ -104,7 +105,15 @@ func SetupServer(api *api.API) *echo.Echo {
 
 	// Setup SigPlot Data Service UI route
 	webappFS := http.FileServer(ui.GetFileSystem())
-	e.GET("/ui/", echo.WrapHandler(http.StripPrefix("/ui/", webappFS)))
+	indexData, err := ui.LoadUI()
+	if err != nil {
+		e.Logger.Fatal(err)
+	}
+	e.GET("/sigplot/ui/*", echo.WrapHandler(webappFS))
+	e.GET("/*", func(c echo.Context) error {
+		return c.HTMLBlob(http.StatusOK, indexData)
+	})
+	// e.GET("/ui/", echo.WrapHandler(http.StripPrefix("/ui/", webappFS)))
 
 	// Add Prometheus as middleware for metrics gathering
 	p := prometheus.NewPrometheus("sigplot_data_service", nil)
