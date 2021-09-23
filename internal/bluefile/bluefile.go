@@ -1,6 +1,41 @@
 package bluefile
 
-import "unsafe"
+import (
+	"unsafe"
+)
+
+// Calculated Fields
+var SPA = map[string]int{
+	"S": 1,
+	"C": 2,
+	"V": 3,
+	"Q": 4,
+	"M": 9,
+	"X": 10,
+	"T": 16,
+	"U": 1,
+	"1": 1,
+	"2": 2,
+	"3": 3,
+	"4": 4,
+	"5": 5,
+	"6": 6,
+	"7": 7,
+	"8": 8,
+	"9": 9,
+}
+
+var BPS = map[string]float64{
+	"P": 0.125,
+	"A": 1,
+	"O": 1,
+	"B": 1,
+	"I": 2,
+	"L": 4,
+	"X": 8,
+	"F": 4,
+	"D": 8,
+}
 
 type BlueHeader struct {
 	Version   [4]byte    // Header Version

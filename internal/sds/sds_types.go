@@ -164,25 +164,9 @@ var DecimationLookup = map[int]int{
 	10: 512,
 }
 
-type Location struct {
-	LocationName   string `json:"locationName"`
-	LocationType   string `json:"locationType"`
-	Path           string `json:"path"`
-	MinioBucket    string `json:"minioBucket"`
-	Location       string `json:"location"`
-	MinioAccessKey string `json:"minioAccessKey"`
-	MinioSecretKey string `json:"minioSecretKey"`
-}
-
-// Configuration Struct for Configuraion File
-type Configuration struct {
-	Port             int        `json:"port"`
-	CacheLocation    string     `json:"cacheLocation"`
-	Logfile          string     `json:"logfile"`
-	CacheMaxBytes    int64      `json:"cacheMaxBytes"`
-	CheckCacheEvery  int        `json:"checkCacheEvery"`
-	MaxBytesZminZmax int        `json:"maxBytesZminZmax"`
-	LocationDetails  []Location `json:"locationDetails"`
+type File struct {
+	Filename string `json:"filename"`
+	Type     string `json:"type"`
 }
 
 type FileMetaData struct {
@@ -201,12 +185,10 @@ type FileMetaData struct {
 	Ysize      int     `json:"ysize"`
 }
 
-var Config Configuration
-
 var IoMutex = &sync.Mutex{}
 var ZMinMaxTileMutex = &sync.Mutex{}
 
-func (request *RdsRequest) FindZminMax() {
+func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 	start := time.Now()
 	ZMinMaxTileMutex.Lock()
 	zminmax, ok := ZminzmaxFileMap[request.FileName+request.Cxmode]
@@ -227,8 +209,10 @@ func (request *RdsRequest) FindZminMax() {
 		if complexFlag {
 			bytesPerElement = bytesPerElement * 2
 		}
-		log.Println("Computing Zminmax", bytesPerElement, request.FileXSize, request.FileYSize, Config.MaxBytesZminZmax)
-		if (int(float64(request.FileXSize*request.FileYSize) * (bytesPerElement))) < Config.MaxBytesZminZmax { // File is small enough, look at entire file for Zmax/Zmin
+		log.Println("Computing Zminmax", bytesPerElement, request.FileXSize, request.FileYSize, maxBytesZminZmax)
+		// File is small enough, look at entire file for Zmax/Zmin
+
+		if (int(float64(request.FileXSize*request.FileYSize) * (bytesPerElement))) < maxBytesZminZmax {
 			log.Println("Computing Zmax/Zmin on whole file, not previously computed")
 			min := make([]float64, request.FileYSize)
 			max := make([]float64, request.FileYSize)
@@ -252,9 +236,9 @@ func (request *RdsRequest) FindZminMax() {
 			min := make([]float64, numSubSections)
 			max := make([]float64, numSubSections)
 			done := make(chan bool, 1)
-			spaceBytes := (float64(request.FileXSize) * bytesPerElement) - float64(Config.MaxBytesZminZmax)
+			spaceBytes := (float64(request.FileXSize) * bytesPerElement) - float64(maxBytesZminZmax)
 			elementsPerSpace := int(spaceBytes/bytesPerElement) / (numSubSections - 1)
-			elementsPerSection := Config.MaxBytesZminZmax / numSubSections
+			elementsPerSection := maxBytesZminZmax / numSubSections
 
 			zminmaxRequest.Xsize = elementsPerSection
 			// First section of the file
@@ -287,7 +271,7 @@ func (request *RdsRequest) FindZminMax() {
 			ZminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
 
 		} else { // If file is large and has multiple lines then CheckError the first, last, and a number of middles lines
-			numMiddlesLines := int(math.Max(float64((Config.MaxBytesZminZmax/request.FileXSize)-2), 0))
+			numMiddlesLines := int(math.Max(float64((maxBytesZminZmax/request.FileXSize)-2), 0))
 			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed. Number of middle lines:", numMiddlesLines)
 			min := make([]float64, 2+numMiddlesLines)
 			max := make([]float64, 2+numMiddlesLines)

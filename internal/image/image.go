@@ -188,7 +188,7 @@ func CreateOutput(dataIn []float64, fileFormat string, zmin, zmax float64, color
 	// }
 
 	dataOut := new(bytes.Buffer)
-	var numColors int = 1000
+	numColors := 1000
 	if fileFormat == "RGBA" {
 		controlColors := GetColorControlPoints(colorMap)
 		colorPalette := MakeColorPalette(controlColors, numColors)
@@ -196,7 +196,8 @@ func CreateOutput(dataIn []float64, fileFormat string, zmin, zmax float64, color
 			colorsPerSpan := (zmax - zmin) / float64(numColors)
 			for i := 0; i < len(dataIn); i++ {
 				colorIndex := math.Round((dataIn[i]-zmin)/colorsPerSpan) - 1
-				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1)) //Ensure colorIndex is within the colorPalette
+				// Ensure colorIndex is within the colorPalette
+				colorIndex = math.Min(math.Max(colorIndex, 0), float64(numColors-1))
 				a := 255
 				//log.Println("colorIndex", colorIndex,dataIn[i],zmin,zmax,colorsPerSpan)
 				dataOut.WriteByte(byte(colorPalette[int(colorIndex)].Red))
@@ -261,7 +262,7 @@ func CreateOutput(dataIn []float64, fileFormat string, zmin, zmax float64, color
 		case "D":
 			var numSlice = make([]float64, len(dataIn))
 			for i := 0; i < len(numSlice); i++ {
-				numSlice[i] = float64(dataIn[i])
+				numSlice[i] = dataIn[i]
 			}
 
 			err := binary.Write(dataOut, binary.LittleEndian, &numSlice)

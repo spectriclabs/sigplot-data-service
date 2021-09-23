@@ -2,7 +2,6 @@ package cache
 
 import (
 	"fmt"
-	"github.com/spectriclabs/sigplot-data-service/internal/sds"
 	"io"
 	"io/ioutil"
 	"log"
@@ -11,6 +10,10 @@ import (
 	"strings"
 	"time"
 )
+
+type Cache struct {
+	Location string
+}
 
 // UrlToCacheFileName uses a url and query string
 // to form SigPlot Data Services' cached file name.
@@ -23,46 +26,39 @@ func UrlToCacheFileName(url string) string {
 
 // GetDataFromCache retrieves data from a provided `cacheFileName`
 // within a `subDir` directory
-func GetDataFromCache(cacheFileName string, subDir string) ([]byte, bool) {
-	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
+func (c *Cache) GetDataFromCache(cacheFileName string, subDir string) ([]byte, error) {
+	fullPath := fmt.Sprintf("%s%s%s", c.Location, subDir, cacheFileName)
 	outData, err := ioutil.ReadFile(fullPath)
-	if err != nil {
-		return outData, false
-	}
-	return outData, true
+	return outData, err
 }
 
 // GetItemFromCache retrieves a file from a `cacheFileName`
 // within a `subDir` directory and returns an `io.ReadSeeker`
-func GetItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, bool) {
-	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
+func (c *Cache) GetItemFromCache(cacheFileName string, subDir string) (io.ReadSeeker, error) {
+	fullPath := fmt.Sprintf("%s%s%s", c.Location, subDir, cacheFileName)
 	file, err := os.Open(fullPath)
-	if err != nil {
-		log.Println("Request not in Cache", err)
-		return nil, false
-	}
-	return file, true
+	return file, err
 }
 
 // PutItemInCache places `data` into file denoted by `cacheFileName`
 // within `subDir`
-func PutItemInCache(cacheFileName string, subDir string, data []byte) {
-	fullPath := fmt.Sprintf("%s%s%s", sds.Config.CacheLocation, subDir, cacheFileName)
+func (c *Cache) PutItemInCache(cacheFileName string, subDir string, data []byte) error {
+	fullPath := fmt.Sprintf("%s%s%s", c.Location, subDir, cacheFileName)
 	fullPathDirectory := filepath.Dir(fullPath)
 	if _, err := os.Stat(fullPathDirectory); os.IsNotExist(err) {
 		mkdirErr := os.Mkdir(fullPathDirectory, 0755)
-		log.Println("Error creating cache directory", mkdirErr)
+		return mkdirErr
 	}
 	file, err := os.Create(fullPath)
 	if err != nil {
-		log.Println("Error creating Cache File", err)
-		return
+		return err
 	}
 	num, err := file.Write(data)
 	if err != nil || num != len(data) {
-		log.Println("Error creating Cache File", err)
-		return
+		return err
 	}
+
+	return nil
 }
 
 // CheckCache runs a check every `checkInterval` seconds
