@@ -12,6 +12,21 @@ import (
 	"time"
 )
 
+//func HandleRDS(tiled bool) {
+//	rds := sds.RdsRequest{TileRequest: tiled}
+
+//	if tiled {
+//		ValidateTiled()
+//	} else {
+//		ValidateNotTiled()
+//	}
+//}
+
+// GetRDSTile handles retrieving tiles in a WMS-like
+// tiling manner.
+//
+// The URL is of the form:
+// /sds/rdstile/tileXSize/tileYSize/decxMode/decYMode/tileX/tileY/locationName
 func (a *API) GetRDSTile(c echo.Context) error {
 	var data []byte
 	var inCache bool
@@ -25,7 +40,6 @@ func (a *API) GetRDSTile(c echo.Context) error {
 	}
 
 	// Extract URL Parameters
-	// URL form: /sds/rdstile/tileXSize/tileYSize/decxMode/decYMode/tileX/tileY/locationName
 	allowedTileSizes := [5]int{100, 200, 300, 400, 500}
 	if !sds.IntInSlice(tileRequest.TileXSize, allowedTileSizes[:]) {
 		return c.String(

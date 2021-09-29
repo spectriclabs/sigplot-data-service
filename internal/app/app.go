@@ -68,7 +68,7 @@ func ParseCLI() config.Config {
 	pflag.StringVarP(&cfg.Host, "host", "i", "0.0.0.0", "Host where the server will run")
 	pflag.IntVarP(&cfg.Port, "port", "p", 5055, "Port where the server will run")
 	pflag.BoolVarP(&cfg.Debug, "debug", "d", false, "Whether or not to enable debug logging")
-	pflag.StringVarP(&cfg.ConfigFile, "config", "c", "./sdsConfig.json", "Location of SDS config file")
+	pflag.StringVarP(&cfg.ConfigFile, "config", "c", "./sds_config.json", "Location of SDS config file")
 	pflag.BoolVarP(&cfg.UseCache, "use-cache", "u", true, "Use SDS Cache. Can be disabled for certain cases like testing.")
 	pflag.StringVarP(&cfg.CacheLocation, "cache-location", "C", "./sdscache/", "Where the cache will be stored")
 	pflag.IntVarP(&cfg.CachePollingInterval, "cache-polling-interval", "P", 60, "How often to check the cache (in seconds)")
@@ -99,9 +99,8 @@ func SetupServer(api *api.API) *echo.Echo {
 		"/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/*",
 		api.GetRDSTile,
 	)
-	// e.GET("/sds/rdsxcut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", api.GetRDSXYCut)
-	// e.GET("/sds/rdsycut/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", api.GetRDSXYCut)
-	// e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize/:location/*", api.GetLDS)
+	e.GET("/sds/:cuttype/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", api.GetRDSXYCut)
+	e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize/:location/*", api.GetLDS)
 
 	// Setup SigPlot Data Service UI route
 	webappFS := http.FileServer(ui.GetFileSystem())

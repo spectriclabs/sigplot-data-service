@@ -45,9 +45,9 @@ type RdsRequest struct {
 	Cxmode         string `query:"cxmode,omitempty"`
 	CxmodeSet      bool
 	OutputFmt      string  `query:"outfmt,omitempty"`
-	Outxsize       int     `json:"outxsize"`
-	Outysize       int     `json:"outysize"`
-	Outzsize       int     `json:"outzsize"`
+	Outxsize       int     `json:"outxsize" param:"outxsize"`
+	Outysize       int     `json:"outysize" param:"outysize"`
+	Outzsize       int     `json:"outzsize" param:"outzsize"`
 	Zmin           float64 `json:"zmin" query:"zmin,omitempty"`
 	Zmax           float64 `json:"zmax" query:"zmax,omitempty"`
 	Filexstart     float64 `json:"filexstart"`
@@ -58,7 +58,10 @@ type RdsRequest struct {
 	Xsize          int     `json:"xsize"`
 	Ystart         int     `json:"ystart"`
 	Ysize          int     `json:"ysize"`
-	X1, X2, Y1, Y2 int
+	X1 int `param:"x1"`
+	X2 int `param:"x2"`
+	Y1 int `param:"y1"`
+	Y2 int `param:"y2"`
 }
 
 func (request *RdsRequest) ComputeYSize() {
