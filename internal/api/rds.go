@@ -186,7 +186,7 @@ func (a *API) GetRDSTile(c echo.Context) error {
 	}
 
 	elapsed := time.Since(start)
-	c.Logger().Infof("Length of Output Data %d processed in %lf sec", len(data), elapsed)
+	c.Logger().Infof("Length of Output Data %d processed in %s", len(data), elapsed.String())
 
 	// Get the metadata for this request to put into the return header.
 	fileMetaDataJSON, metaCacheErr := a.Cache.GetDataFromCache(cacheFileName+"meta", "outputFiles/")
