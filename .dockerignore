@@ -1,0 +1,5 @@
+sigplot_data_service
+dist/
+.git/
+ui/webapp/node_modules/
+sdscache/

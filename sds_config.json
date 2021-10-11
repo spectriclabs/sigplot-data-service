@@ -1,0 +1,27 @@
+{
+  "location_details": [
+    {
+      "location_name": "ServiceDir",
+      "location_type": "localFile",
+      "path": "./"
+    },
+    {
+      "location_name": "ServiceDirData",
+      "location_type": "localFile",
+      "path": "./data"
+    },
+    {
+      "location_name": "sdsdata",
+      "location_type": "localFile",
+      "path": "/data/sdsdata/"
+    },
+    {
+      "location_name": "minio",
+      "location_type": "minio",
+      "location": "192.168.1.229:9000",
+      "minio_access_key": "minio",
+      "minio_bucket": "sdsdata",
+      "minio_secret_key": "miniostorage"
+    }
+  ]
+}

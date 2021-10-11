@@ -1,19 +1,41 @@
-FROM golang:1.13.8-alpine3.11
+FROM node:16-alpine3.13 as jsbuilder
 
-RUN apk add --no-cache nodejs npm make git yarn
+WORKDIR /app
 
-WORKDIR /go/src/app
+COPY ui/webapp/package.json ./package.json
 
-RUN go get github.com/go-bindata/go-bindata/...
+# We want to cache the node_modules directory
+RUN npm i
 
-RUN go get github.com/elazarl/go-bindata-assetfs/...
+COPY ui/webapp .
 
-COPY . .
+RUN npm run build
 
-RUN go get -d -v ./...
+FROM golang:1.16-alpine3.13 as gobuilder
 
-RUN rm -f bindata_assetfs.go && make release && go install -tags ui
+WORKDIR /opt/sds/app
 
-RUN mkdir logs
+# Copy only the Go source files over
+COPY cmd .
+COPY internal .
+COPY ui/sds_ui.go ./ui/
+COPY vendor .
+
+# Copy the built JS app from the previous stage
+COPY --from=jsbuilder /app/dist ./ui/webapp/dist
+
+# Put everything together
+RUN make sds
+
+FROM busybox:1.33.1
+
+WORKDIR /opt/sds
+
+# Copy over the built static binary
+COPY --from=gobuilder /opt/sds/sigplot_data_service .
+
+EXPOSE 5055
 
 ENTRYPOINT [ "sigplot-data-service" ]
+
+CMD "-h"

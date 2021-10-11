@@ -1,12 +1,12 @@
-module sigplot-data-service
+module github.com/spectriclabs/sigplot-data-service
 
 go 1.16
 
 require (
-	github.com/elazarl/go-bindata-assetfs v1.0.0
-	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/minio/minio-go/v6 v6.0.47
-	github.com/tkanos/gonfig v0.0.0-20181112185242-896f3d81fadf
-	gonum.org/v1/gonum v0.6.2
-	gopkg.in/yaml.v2 v2.2.8 // indirect
+	github.com/labstack/echo-contrib v0.11.0
+	github.com/labstack/echo/v4 v4.4.0
+	github.com/minio/minio-go/v7 v7.0.12
+	github.com/spf13/pflag v1.0.5
+	github.com/stretchr/testify v1.7.0
+	gonum.org/v1/gonum v0.9.3
 )
