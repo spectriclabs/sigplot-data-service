@@ -33,9 +33,10 @@ func (a *API) GetRDSTile(c echo.Context) error {
 
 	tileRequest := sds.RdsRequest{
 		TileRequest: true,
+		OutputFmt: "RGBA",
 	}
 
-	if err := c.Bind(tileRequest); err != nil {
+	if err := c.Bind(&tileRequest); err != nil {
 		return err
 	}
 
@@ -110,7 +111,6 @@ func (a *API) GetRDSTile(c echo.Context) error {
 		var openErr error
 		c.Logger().Info("RDS Request not in Cache, computing result")
 		locationName := c.Param("location")
-		tileRequest.FileName = c.Param("*")
 		tileRequest.Reader, openErr = sds.OpenDataSource(a.Cfg, a.Cache, locationName, tileRequest.FileName)
 		if openErr != nil {
 			return openErr
