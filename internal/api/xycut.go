@@ -25,11 +25,13 @@ func (a *API) GetRDSXYCut(c echo.Context) error {
 	filename := c.Param("*")
 
 	var rdsRequest sds.RdsRequest
-	if err := c.Bind(rdsRequest); err != nil {
+	if err := c.Bind(&rdsRequest); err != nil {
 		return err
 	}
 
 	rdsRequest.ComputeRequestSizes()
+
+	c.Logger().Debugf("RDS Request: %v", rdsRequest)
 
 	if rdsRequest.Xsize < 1 || rdsRequest.Ysize < 1 {
 		err := fmt.Errorf("bad Xsize or ysize. xsize: %d ysize: %d", rdsRequest.Xsize, rdsRequest.Ysize)
@@ -93,7 +95,7 @@ func (a *API) GetRDSXYCut(c echo.Context) error {
 			}
 			rdsRequest.ComputeYSize()
 		} else {
-			err := fmt.Errorf("invalid file type")
+			err := fmt.Errorf("invalid file type: %s", rdsRequest.FileName)
 			return c.String(http.StatusBadRequest, err.Error())
 		}
 
@@ -144,7 +146,11 @@ func (a *API) GetRDSXYCut(c echo.Context) error {
 			rdsRequest.FindZminMax(a.Cfg.MaxBytesZminZmax)
 		}
 
-		data = sds.ProcessLineRequest(rdsRequest, cutType)
+		if cutType == "rds" {
+			data = sds.ProcessRequest(rdsRequest)
+		} else {
+			data = sds.ProcessLineRequest(rdsRequest, cutType)
+		}
 		if a.Cfg.UseCache {
 			go a.Cache.PutItemInCache(cacheFileName, "outputFiles/", data)
 		}
@@ -174,7 +180,7 @@ func (a *API) GetRDSXYCut(c echo.Context) error {
 	}
 
 	elapsed := time.Since(start)
-	c.Logger().Infof("Length of output data %d processed in %lf sec", len(data), elapsed)
+	c.Logger().Infof("Length of output data %d processed in %s", len(data), elapsed.String())
 
 	// Get the metadata for this request to put into the return header.
 	fileMetaDataJSON, metaCacheErr := a.Cache.GetDataFromCache(cacheFileName+"meta", "outputFiles/")
