@@ -21,7 +21,7 @@ type Zminzmax struct {
 type RdsRequest struct {
 	TileRequest    bool
 	FileFormat     string
-	FileName       string
+	FileName       string `param:"*"`
 	FileType       int
 	FileSubsize    int
 	FileXSize      int
@@ -31,7 +31,7 @@ type RdsRequest struct {
 	TileXSize      int `param:"tileXsize"`
 	TileYSize      int `param:"tileYsize"`
 	DecXMode       int `param:"decXmode"`
-	DecYMode       int `param:"dexYmode"`
+	DecYMode       int `param:"decYmode"`
 	TileX          int `param:"tileX"`
 	TileY          int `param:"tileY"`
 	DecX           int
@@ -58,10 +58,10 @@ type RdsRequest struct {
 	Xsize          int     `json:"xsize"`
 	Ystart         int     `json:"ystart"`
 	Ysize          int     `json:"ysize"`
-	X1 int `param:"x1"`
-	X2 int `param:"x2"`
-	Y1 int `param:"y1"`
-	Y2 int `param:"y2"`
+	X1             int     `param:"x1"`
+	X2             int     `param:"x2"`
+	Y1             int     `param:"y1"`
+	Y2             int     `param:"y2"`
 }
 
 func (request *RdsRequest) ComputeYSize() {

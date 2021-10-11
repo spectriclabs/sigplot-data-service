@@ -96,7 +96,7 @@ func SetupServer(api *api.API) *echo.Echo {
 
 	// Data-service routes
 	e.GET(
-		"/sds/rdstile/:location/:tileXsize/:tileYsize/:decimationXMode/:decimationYMode/:tileX/:tileY/*",
+		"/sds/rdstile/:tileXsize/:tileYsize/:decXMode/:decYMode/:tileX/:tileY/:location/*",
 		api.GetRDSTile,
 	)
 	e.GET("/sds/:cuttype/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", api.GetRDSXYCut)
