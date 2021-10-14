@@ -2001,12 +2001,39 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		doneCh := make(chan struct{})
 		defer close(doneCh)
 
+		objectFd, _ := minioClient.GetObject(currentLocation.MinioBucket, urlPath, minio.GetObjectOptions{})
+		if objectFd != nil {
+			// File exists and is a file
+			info, err := objectFd.Stat()
+			if err != nil {
+				log.Println(err)
+				w.WriteHeader(400)
+				return
+			}
+			if info.Err != nil {
+				log.Println(info.Err)
+				w.WriteHeader(400)
+				return
+			}
+
+			if strings.HasSuffix(info.Key, ".tmp") || strings.HasSuffix(info.Key, ".prm") {
+				w.Header().Add("Content-Type", "application/bluefile")
+			} else {
+				w.Header().Add("Content-Type", "application/binary")
+			}
+			w.Header().Add("Access-Control-Allow-Origin", "*")
+			w.Header().Add("Access-Control-Expose-Headers", "*")
+
+			http.ServeContent(w, r, info.Key, time.Now(), objectFd)
+			return
+		}
+
 		var filelist []fileObj
-		objectCh := minioClient.ListObjects(currentLocation.MinioBucket, urlPath,false, doneCh)
+		objectCh := minioClient.ListObjects(currentLocation.MinioBucket, urlPath, false, doneCh)
 		for object := range objectCh {
 			if object.Err != nil {
 				log.Println(object.Err)
-				w.WriteHeader(500)
+				w.WriteHeader(400)
 				return
 			}
 
