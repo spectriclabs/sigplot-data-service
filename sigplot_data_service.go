@@ -1923,7 +1923,7 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locationName := pathData[3]
-	var urlPath string = ""
+	urlPath := ""
 	for i := 4; i < len(pathData); i++ {
 		urlPath = urlPath + pathData[i] + "/"
 	}
@@ -1939,54 +1939,95 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if currentLocation.LocationType != "localFile" {
-		log.Println("Error: Listing Files only support for localfile location Types")
-		w.WriteHeader(400)
-		return
-	}
-
-	if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
-		currentLocation.Path += "/"
-	}
-	fullFilepath := fmt.Sprintf("%s%s", currentLocation.Path, urlPath)
-	fi, err := os.Stat(fullFilepath)
-	if err != nil {
-		log.Println("Error reading path", fullFilepath, err)
-		w.WriteHeader(400)
-		return
-	}
-	mode := fi.Mode()
-	if mode.IsRegular() { //If the URL is to a file, then use raw mode to return file contents
-		log.Println("Path is a file, so will return its contents in raw mode")
-		rawServer := &rawServer{}
-		rawServer.ServeHTTP(w, r)
-		return
-	}
-
-	files, err := ioutil.ReadDir(fullFilepath)
-	if err != nil {
-		log.Println("List Directory Error: ", err)
-		w.WriteHeader(400)
-		return
-	}
 	type fileObj struct {
 		Filename string `json:"filename"`
 		Type     string `json:"type"`
 	}
-	filelist := make([]fileObj, len(files))
-	i := 0
-	for _, file := range files {
-		filelist[i].Filename = file.Name()
-		if file.IsDir() {
-			filelist[i].Type = "directory"
-		} else {
-			filelist[i].Type = "file"
+	var returnbytes []byte
+	switch currentLocation.LocationType {
+	case "localFile":
+		fullFilepath := filepath.Join(currentLocation.Path, urlPath)
+		fi, err := os.Stat(fullFilepath)
+		if err != nil {
+			log.Println("Error reading path", fullFilepath, err)
+			w.WriteHeader(500)
+			return
 		}
-		i++
-	}
-	returnbytes, marshalError := json.Marshal(filelist)
-	if marshalError != nil {
-		log.Println("Problem Marshalling Header to JSON ", marshalError)
+		mode := fi.Mode()
+
+		// If the URL is to a file, then use raw mode to return file contents
+		if mode.IsRegular() {
+			log.Println("Path is a file, so will return its contents in raw mode")
+			rawServer := &rawServer{}
+			rawServer.ServeHTTP(w, r)
+			return
+		}
+
+		files, err := ioutil.ReadDir(fullFilepath)
+		if err != nil {
+			log.Println("List Directory Error: ", err)
+			w.WriteHeader(500)
+			return
+		}
+		filelist := make([]fileObj, len(files))
+		i := 0
+		for _, file := range files {
+			filelist[i].Filename = file.Name()
+			if file.IsDir() {
+				filelist[i].Type = "directory"
+			} else {
+				filelist[i].Type = "file"
+			}
+			i++
+		}
+		returnbytes, err = json.Marshal(filelist)
+		if err != nil {
+			log.Println("Problem Marshalling Header to JSON ", err)
+			w.WriteHeader(500)
+			return
+		}
+	case "minio":
+		minioClient, err := minio.New(
+			currentLocation.Location,
+			currentLocation.MinioAccessKey,
+			currentLocation.MinioSecretKey,
+			false,
+		)
+		if err != nil {
+			log.Println("Error Establishing Connection to Minio", err)
+			w.WriteHeader(500)
+			return
+		}
+		doneCh := make(chan struct{})
+		defer close(doneCh)
+
+		var filelist []fileObj
+		objectCh := minioClient.ListObjects(currentLocation.MinioBucket, urlPath,false, doneCh)
+		for object := range objectCh {
+			if object.Err != nil {
+				log.Println(object.Err)
+				w.WriteHeader(500)
+				return
+			}
+
+			file := fileObj{
+				Filename: object.Key,
+			}
+			if strings.HasSuffix(file.Filename, "/") {
+				file.Type = "directory"
+			} else {
+				file.Type = "file"
+			}
+			filelist = append(filelist, file)
+		}
+		returnbytes, err = json.Marshal(filelist)
+		if err != nil {
+			log.Println("Problem Marshalling Header to JSON ", err)
+			w.WriteHeader(500)
+			return
+		}
+	default:
+		log.Println("Error: Listing Files only support for localfile location Types")
 		w.WriteHeader(400)
 		return
 	}
