@@ -1923,14 +1923,7 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	locationName := pathData[3]
-	urlPath := ""
-	for i := 4; i < len(pathData); i++ {
-		urlPath = urlPath + pathData[i] + "/"
-	}
-
-	if string(r.URL.Path[len(r.URL.Path)-1]) != "/" {
-		urlPath = strings.TrimSuffix(urlPath, "/")
-	}
+	urlPath := filepath.Join(pathData[4:]...)
 
 	var currentLocation Location
 	for i := range configuration.LocationDetails {
@@ -2001,31 +1994,36 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		doneCh := make(chan struct{})
 		defer close(doneCh)
 
-		objectFd, _ := minioClient.GetObject(currentLocation.MinioBucket, urlPath, minio.GetObjectOptions{})
+		if urlPath == "" {
+			urlPath += "/"
+		}
+
+		objectFd, err := minioClient.GetObject(currentLocation.MinioBucket, urlPath, minio.GetObjectOptions{})
+		if err != nil {
+			log.Println(err)
+		}
 		if objectFd != nil {
 			// File exists and is a file
 			info, err := objectFd.Stat()
 			if err != nil {
-				log.Println(err)
-				w.WriteHeader(400)
-				return
-			}
-			if info.Err != nil {
-				log.Println(info.Err)
-				w.WriteHeader(400)
-				return
-			}
-
-			if strings.HasSuffix(info.Key, ".tmp") || strings.HasSuffix(info.Key, ".prm") {
-				w.Header().Add("Content-Type", "application/bluefile")
+				log.Println("Error performing stat on object:", err)
+				if !strings.HasSuffix(urlPath, "/") {
+					urlPath += "/"
+				}
+			} else if info.Err != nil {
+				log.Println(info.Err, info.Key)
 			} else {
-				w.Header().Add("Content-Type", "application/binary")
-			}
-			w.Header().Add("Access-Control-Allow-Origin", "*")
-			w.Header().Add("Access-Control-Expose-Headers", "*")
+				if strings.HasSuffix(info.Key, ".tmp") || strings.HasSuffix(info.Key, ".prm") {
+					w.Header().Add("Content-Type", "application/bluefile")
+				} else {
+					w.Header().Add("Content-Type", "application/binary")
+				}
+				w.Header().Add("Access-Control-Allow-Origin", "*")
+				w.Header().Add("Access-Control-Expose-Headers", "*")
 
-			http.ServeContent(w, r, info.Key, time.Now(), objectFd)
-			return
+				http.ServeContent(w, r, info.Key, time.Now(), objectFd)
+				return
+			}
 		}
 
 		var filelist []fileObj
@@ -2038,7 +2036,7 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			file := fileObj{
-				Filename: object.Key,
+				Filename: filepath.Base(object.Key),
 			}
 			if strings.HasSuffix(file.Filename, "/") {
 				file.Type = "directory"
