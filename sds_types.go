@@ -115,12 +115,12 @@ var bytesPerAtomMap = map[string]float64{
 type Location struct {
 	LocationName   string `json:"locationName"`
 	LocationType   string `json:"locationType"`
-	Path           string `json:"path"`
-	MinioBucket    string `json:"minioBucket"`
-	Location       string `json:"location"`
-	MinioAccessKey string `json:"minioAccessKey"`
-	MinioSecretKey string `json:"minioSecretKey"`
-	MinioUseSSL    bool   `json:"minioUseSSL"`
+	Path           string `json:"path,omitempty"`
+	MinioBucket    string `json:"minioBucket,omitempty"`
+	Location       string `json:"location,omitempty"`
+	MinioAccessKey string `json:"minioAccessKey,omitempty"`
+	MinioSecretKey string `json:"minioSecretKey,omitempty"`
+	MinioUseSSL    bool   `json:"minioUseSSL,omitempty"`
 }
 
 // Configuration Struct for Configuraion File
