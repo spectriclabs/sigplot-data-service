@@ -1,0 +1,6 @@
+sigplot-data-service
+dist/
+.git/
+ui/node_modules/
+sdscache/
+tests

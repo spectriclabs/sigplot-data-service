@@ -120,6 +120,7 @@ type Location struct {
 	Location       string `json:"location"`
 	MinioAccessKey string `json:"minioAccessKey"`
 	MinioSecretKey string `json:"minioSecretKey"`
+	MinioUseSSL    bool   `json:"minioUseSSL"`
 }
 
 // Configuration Struct for Configuraion File

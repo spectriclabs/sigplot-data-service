@@ -711,7 +711,12 @@ func openDataSource(url string, urlPosition int) (io.ReadSeeker, string, bool) {
 		file, inCache := getItemFromCache(cacheFileName, "miniocache/")
 		if !inCache {
 			log.Println("Minio File not in local file Cache, Need to fetch")
-			minioClient, err := minio.New(currentLocation.Location, currentLocation.MinioAccessKey, currentLocation.MinioSecretKey, false)
+			minioClient, err := minio.New(
+				currentLocation.Location,
+				currentLocation.MinioAccessKey,
+				currentLocation.MinioSecretKey,
+				currentLocation.MinioUseSSL,
+			)
 			elapsed := time.Since(start)
 			log.Println(" Time to Make connection ", elapsed)
 			if err != nil {
@@ -1984,7 +1989,7 @@ func (s *fileSystemServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			currentLocation.Location,
 			currentLocation.MinioAccessKey,
 			currentLocation.MinioSecretKey,
-			false,
+			currentLocation.MinioUseSSL,
 		)
 		if err != nil {
 			log.Println("Error Establishing Connection to Minio", err)
