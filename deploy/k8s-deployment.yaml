@@ -1,0 +1,64 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: sigplot-data-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: sigplot-data-service
+  
+  template:
+    metadata:
+      labels:
+        app: sigplot-data-service
+    spec:
+      containers:
+      - name: sigplot-data-service
+        image: sigplot-data-service:0.7
+        args:
+        - --config=/opt/sds/sdsConfig.json
+        ports:
+        - containerPort: 1338
+        volumeMounts:
+        - name: sds-secret
+          mountPath: /opt/sds/sdsConfig.json
+          subPath: sdsConfig.json
+          readOnly: true
+      volumes:
+      - name: sds-secret
+        secret:
+          defaultMode: 420
+          secretName: sds-secret
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: sigplot-data-service
+spec:
+  ports:
+  - port: 1338
+    protocol: TCP
+  selector:
+    app: sigplot-data-service
+
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: sigplot-data-service
+spec:
+  rules:
+  - host: ...
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sigplot-data-service
+            port:
+              number: 1338
