@@ -1,45 +1,49 @@
 {
-    "port": 5055,
     "cacheLocation": "./sdscache/",
     "cacheMaxBytes": 100000000,
-    "checkCacheEvery":60,
+    "checkCacheEvery": 60,
+    "locationDetails": [
+        {
+            "location": "",
+            "locationName": "ServiceDir",
+            "locationType": "localFile",
+            "minioAccessKey": "",
+            "minioBucket": "",
+            "minioSecretKey": "",
+            "minioUseSSL": false,
+            "path": "./"
+        },
+        {
+            "location": "",
+            "locationName": "ServiceDirData",
+            "locationType": "localFile",
+            "minioAccessKey": "",
+            "minioBucket": "",
+            "minioSecretKey": "",
+            "minioUseSSL": false,
+            "path": "./data"
+        },
+        {
+            "location": "",
+            "locationName": "sdsdata",
+            "locationType": "localFile",
+            "minioAccessKey": "",
+            "minioBucket": "",
+            "minioSecretKey": "",
+            "minioUseSSL": false,
+            "path": "/data/sdsdata/"
+        },
+        {
+            "location": "192.168.1.229:9000",
+            "locationName": "minio",
+            "locationType": "minio",
+            "minioAccessKey": "minio",
+            "minioBucket": "sdsdata",
+            "minioSecretKey": "miniostorage",
+            "minioUseSSL": false,
+            "path": ""
+        }
+    ],
     "maxBytesZminZmax": 1000000,
-    "locationDetails": [{
-                            "locationName":     "ServiceDir",
-                            "locationType":     "localFile",
-	                        "path":             "./",
-	                        "minioBucket":      "",
-	                        "location":         "",
-	                        "minioAccessKey":   "",
-	                        "minioSecretKey":   ""
-                        },
-                        {
-                            "locationName":     "ServiceDirData",
-                            "locationType":     "localFile",
-	                        "path":             "./data",
-	                        "minioBucket":      "",
-	                        "location":         "",
-	                        "minioAccessKey":   "",
-	                        "minioSecretKey":   ""
-                        },
-                        {
-                            "locationName":     "sdsdata",
-                            "locationType":     "localFile",
-	                        "path":             "/data/sdsdata/",
-	                        "minioBucket":      "",
-	                        "location":         "",
-	                        "minioAccessKey":   "",
-	                        "minioSecretKey":   ""
-                        },
-                        {
-                            "locationName":     "minio",
-                            "locationType":     "minio",
-	                        "path":             "",
-	                        "minioBucket":      "sdsdata",
-	                        "location":         "192.168.1.229:9000",
-	                        "minioAccessKey":   "minio",
-	                        "minioSecretKey":   "miniostorage"
-                        }
-                        ]
-
+    "port": 5055
 }
