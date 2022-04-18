@@ -2233,10 +2233,22 @@ func main() {
 	msg := ":%d"
 	bindAddr := fmt.Sprintf(msg, configuration.Port)
 
+	// Set sane defaults if ReadTimeout and WriteTimeout are not set.
+	// Recall: if they aren't set, they'll default to 0.
+	readTimeout := configuration.ReadTimeout
+	if readTimeout == 0 {
+		readTimeout = 240
+	}
+
+	writeTimeout := configuration.WriteTimeout
+	if writeTimeout == 0 {
+		writeTimeout = 30
+	}
+
 	svr := &http.Server{
 		Addr:           bindAddr,
-		ReadTimeout:    240 * time.Second,
-		WriteTimeout:   30 * time.Second,
+		ReadTimeout:    time.Duration(readTimeout) * time.Second,
+		WriteTimeout:   time.Duration(writeTimeout) * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 	log.Fatal(svr.ListenAndServe())

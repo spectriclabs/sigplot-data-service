@@ -126,6 +126,8 @@ type Location struct {
 // Configuration Struct for Configuraion File
 type Configuration struct {
 	Port             int        `json:"port"`
+	ReadTimeout      int        `json:"read_timeout"`
+	WriteTimeout     int        `json:"write_timeout"`
 	CacheLocation    string     `json:"cacheLocation"`
 	Logfile          string     `json:"logfile"`
 	CacheMaxBytes    int64      `json:"cacheMaxBytes"`
