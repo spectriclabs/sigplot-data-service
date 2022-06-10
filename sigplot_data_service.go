@@ -35,6 +35,7 @@ var zminmaxtileMutex = &sync.Mutex{}
 var uiEnabled = true // set to false by stub_asset if the ui build isn't included
 var stubHTML = ""    // set to HTML by stub_asset if the ui build isn't included
 var configuration Configuration
+var cacheMap = make(map[string]os.FileInfo)
 
 func createOutput(dataIn []float64, fileFormatString string, zmin, zmax float64, colorMap string) []byte {
 	// for i := 0; i < len(dataIn); i++ {
@@ -671,6 +672,52 @@ func processLineRequest(dataRequest rdsRequest, cutType string) []byte {
 	return outData.Bytes()
 }
 
+func getFilePath(url string, urlPosition int) (string, string) {
+
+	pathData := strings.Split(url, "/")
+	locationName := pathData[urlPosition]
+	var urlPath string = ""
+	for i := urlPosition + 1; i < len(pathData)-1; i++ {
+		urlPath = urlPath + pathData[i] + "/"
+	}
+
+	fileName := pathData[len(pathData)-1]
+	var currentLocation Location
+	for i := range configuration.LocationDetails {
+		if configuration.LocationDetails[i].LocationName == locationName {
+			currentLocation = configuration.LocationDetails[i]
+		}
+	}
+	if len(currentLocation.Path) > 0 {
+		if string(currentLocation.Path[len(currentLocation.Path)-1]) != "/" {
+			currentLocation.Path += "/"
+		}
+	}
+    fullFilepath := fmt.Sprintf("%s%s%s", currentLocation.Path, urlPath, fileName)
+    return fileName, fullFilepath
+}
+
+func checkCacheInfile(url string, urlPosition int) (bool, string) {
+
+    fileName, filePath := getFilePath(url, urlPosition)
+    cacheFileStats, hasFile := cacheMap[fileName]
+    if hasFile {
+        fStats, err := os.Stat(filePath)
+        if err != nil {
+            errMsg := fmt.Sprintf("Could not stat input file: %s", filePath)
+            return false, errMsg
+        }
+        if fStats.Size() != cacheFileStats.Size() || fStats.ModTime() != cacheFileStats.ModTime() {
+            log.Println("Input file doesn't match input file for cached file")
+            return false, ""
+        }
+    } else {
+        log.Println("Input file not recognized, not using cache")
+        return false, ""
+    }
+    return true, ""
+}
+
 func openDataSource(url string, urlPosition int) (io.ReadSeeker, string, bool) {
 
 	pathData := strings.Split(url, "/")
@@ -702,6 +749,11 @@ func openDataSource(url string, urlPosition int) (io.ReadSeeker, string, bool) {
 			log.Println("Error opening File,", err)
 			return nil, "", false
 		}
+        cacheMap[fileName], err = os.Stat(fullFilepath)
+        if err != nil {
+            log.Println("Error statting File,", err)
+            return nil, "", false
+        }
 		reader := io.ReadSeeker(file)
 		return reader, fileName, true
 	case "minio":
@@ -1002,6 +1054,17 @@ func (s *rdsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		inCache = false
 	}
 
+    // If request is in cache, verify that the input file it's based on hasn't changed
+    var err string
+    if inCache {
+        inCache, err = checkCacheInfile(r.URL.Path, 9)
+        if err != "" {
+            log.Println(err)
+            w.WriteHeader(400)
+            return
+        }
+    }
+
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		rdsRequest.Reader, rdsRequest.FileName, ok = openDataSource(r.URL.Path, 9)
@@ -1202,6 +1265,17 @@ func (s *rdsTileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		inCache = false
 	}
 
+    // If request is in cache, verify that the input file it's based on hasn't changed
+    var err string
+    if inCache {
+        inCache, err = checkCacheInfile(r.URL.Path, 9)
+        if err != "" {
+            log.Println(err)
+            w.WriteHeader(400)
+            return
+        }
+    }
+
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
 		tileRequest.Reader, tileRequest.FileName, ok = openDataSource(r.URL.Path, 9)
@@ -1391,6 +1465,17 @@ func (s *ldsServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
+
+    // If request is in cache, verify that the input file it's based on hasn't changed
+    var err string
+    if inCache {
+        inCache, err = checkCacheInfile(r.URL.Path, 9)
+        if err != "" {
+            log.Println(err)
+            w.WriteHeader(400)
+            return
+        }
+    }
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
@@ -1594,6 +1679,17 @@ func (s *rdsxyCutServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inCache = false
 	}
+
+    // If request is in cache, verify that the input file it's based on hasn't changed
+    var err string
+    if inCache {
+        inCache, err = checkCacheInfile(r.URL.Path, 9)
+        if err != "" {
+            log.Println(err)
+            w.WriteHeader(400)
+            return
+        }
+    }
 
 	if !inCache { // If the output is not already in the cache then read the data file and do the processing.
 		log.Println("RDS Request not in Cache, computing result")
