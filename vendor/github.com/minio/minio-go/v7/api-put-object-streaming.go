@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7/pkg/s3utils"
@@ -38,23 +39,24 @@ import (
 //
 // Following code handles these types of readers.
 //
-//  - *minio.Object
-//  - Any reader which has a method 'ReadAt()'
-//
-func (c Client) putObjectMultipartStream(ctx context.Context, bucketName, objectName string,
-	reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
-
-	if !isObject(reader) && isReadAt(reader) && !opts.SendContentMd5 {
+//   - *minio.Object
+//   - Any reader which has a method 'ReadAt()'
+func (c *Client) putObjectMultipartStream(ctx context.Context, bucketName, objectName string,
+	reader io.Reader, size int64, opts PutObjectOptions,
+) (info UploadInfo, err error) {
+	if opts.ConcurrentStreamParts && opts.NumThreads > 1 {
+		info, err = c.putObjectMultipartStreamParallel(ctx, bucketName, objectName, reader, opts)
+	} else if !isObject(reader) && isReadAt(reader) && !opts.SendContentMd5 {
 		// Verify if the reader implements ReadAt and it is not a *minio.Object then we will use parallel uploader.
 		info, err = c.putObjectMultipartStreamFromReadAt(ctx, bucketName, objectName, reader.(io.ReaderAt), size, opts)
 	} else {
 		info, err = c.putObjectMultipartStreamOptionalChecksum(ctx, bucketName, objectName, reader, size, opts)
 	}
-	if err != nil {
+	if err != nil && s3utils.IsGoogleEndpoint(*c.endpointURL) {
 		errResp := ToErrorResponse(err)
 		// Verify if multipart functionality is not available, if not
 		// fall back to single PutObject operation.
-		if errResp.Code == "AccessDenied" && strings.Contains(errResp.Message, "Access Denied") {
+		if errResp.Code == AccessDenied && strings.Contains(errResp.Message, "Access Denied") {
 			// Verify if size of reader is greater than '5GiB'.
 			if size > maxSinglePutObjectSize {
 				return UploadInfo{}, errEntityTooLarge(size, maxSinglePutObjectSize, bucketName, objectName)
@@ -90,8 +92,9 @@ type uploadPartReq struct {
 // temporary files for staging all the data, these temporary files are
 // cleaned automatically when the caller i.e http client closes the
 // stream after uploading all the contents successfully.
-func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketName, objectName string,
-	reader io.ReaderAt, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
+func (c *Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketName, objectName string,
+	reader io.ReaderAt, size int64, opts PutObjectOptions,
+) (info UploadInfo, err error) {
 	// Input validation.
 	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
 		return UploadInfo{}, err
@@ -112,6 +115,8 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 		return UploadInfo{}, err
 	}
 
+	withChecksum := c.trailingHeaderSupport
+
 	// Aborts the multipart upload in progress, if the
 	// function returns any error, since we do not resume
 	// we should purge the parts which have been uploaded
@@ -129,34 +134,44 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 	var complMultipartUpload completeMultipartUpload
 
 	// Declare a channel that sends the next part number to be uploaded.
-	// Buffered to 10000 because thats the maximum number of parts allowed
-	// by S3.
-	uploadPartsCh := make(chan uploadPartReq, 10000)
+	uploadPartsCh := make(chan uploadPartReq)
 
 	// Declare a channel that sends back the response of a part upload.
-	// Buffered to 10000 because thats the maximum number of parts allowed
-	// by S3.
-	uploadedPartsCh := make(chan uploadedPartRes, 10000)
+	uploadedPartsCh := make(chan uploadedPartRes)
 
 	// Used for readability, lastPartNumber is always totalPartsCount.
 	lastPartNumber := totalPartsCount
 
+	partitionCtx, partitionCancel := context.WithCancel(ctx)
+	defer partitionCancel()
 	// Send each part number to the channel to be processed.
-	for p := 1; p <= totalPartsCount; p++ {
-		uploadPartsCh <- uploadPartReq{PartNum: p}
-	}
-	close(uploadPartsCh)
+	go func() {
+		defer close(uploadPartsCh)
 
-	var partsBuf = make([][]byte, opts.getNumThreads())
-	for i := range partsBuf {
-		partsBuf[i] = make([]byte, 0, partSize)
-	}
+		for p := 1; p <= totalPartsCount; p++ {
+			select {
+			case <-partitionCtx.Done():
+				return
+			case uploadPartsCh <- uploadPartReq{PartNum: p}:
+			}
+		}
+	}()
 
 	// Receive each part number from the channel allowing three parallel uploads.
 	for w := 1; w <= opts.getNumThreads(); w++ {
-		go func(w int, partSize int64) {
-			// Each worker will draw from the part channel and upload in parallel.
-			for uploadReq := range uploadPartsCh {
+		go func(partSize int64) {
+			for {
+				var uploadReq uploadPartReq
+				var ok bool
+				select {
+				case <-ctx.Done():
+					return
+				case uploadReq, ok = <-uploadPartsCh:
+					if !ok {
+						return
+					}
+					// Each worker will draw from the part channel and upload in parallel.
+				}
 
 				// If partNumber was not uploaded we calculate the missing
 				// part offset and size. For all other part numbers we
@@ -166,30 +181,42 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 				// As a special case if partNumber is lastPartNumber, we
 				// calculate the offset based on the last part size.
 				if uploadReq.PartNum == lastPartNumber {
-					readOffset = (size - lastPartSize)
+					readOffset = size - lastPartSize
 					partSize = lastPartSize
 				}
 
-				n, rerr := readFull(io.NewSectionReader(reader, readOffset, partSize), partsBuf[w-1][:partSize])
-				if rerr != nil && rerr != io.ErrUnexpectedEOF && err != io.EOF {
-					uploadedPartsCh <- uploadedPartRes{
-						Error: rerr,
-					}
-					// Exit the goroutine.
-					return
+				sectionReader := newHook(io.NewSectionReader(reader, readOffset, partSize), opts.Progress)
+				trailer := make(http.Header, 1)
+				if withChecksum {
+					crc := opts.AutoChecksum.Hasher()
+					trailer.Set(opts.AutoChecksum.Key(), base64.StdEncoding.EncodeToString(crc.Sum(nil)))
+					sectionReader = newHashReaderWrapper(sectionReader, crc, func(hash []byte) {
+						trailer.Set(opts.AutoChecksum.Key(), base64.StdEncoding.EncodeToString(hash))
+					})
 				}
 
-				// Get a section reader on a particular offset.
-				hookReader := newHook(bytes.NewReader(partsBuf[w-1][:n]), opts.Progress)
-
 				// Proceed to upload the part.
-				objPart, err := c.uploadPart(ctx, bucketName, objectName,
-					uploadID, hookReader, uploadReq.PartNum,
-					"", "", partSize, opts.ServerSideEncryption)
+				p := uploadPartParams{
+					bucketName:   bucketName,
+					objectName:   objectName,
+					uploadID:     uploadID,
+					reader:       sectionReader,
+					partNumber:   uploadReq.PartNum,
+					size:         partSize,
+					sse:          opts.ServerSideEncryption,
+					streamSha256: !opts.DisableContentSha256,
+					sha256Hex:    "",
+					trailer:      trailer,
+				}
+				objPart, err := c.uploadPart(ctx, p)
 				if err != nil {
-					uploadedPartsCh <- uploadedPartRes{
+					select {
+					case <-ctx.Done():
+					case uploadedPartsCh <- uploadedPartRes{
 						Error: err,
+					}:
 					}
+
 					// Exit the goroutine.
 					return
 				}
@@ -198,29 +225,47 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 				uploadReq.Part = objPart
 
 				// Send successful part info through the channel.
-				uploadedPartsCh <- uploadedPartRes{
+				select {
+				case <-ctx.Done():
+				case uploadedPartsCh <- uploadedPartRes{
 					Size:    objPart.Size,
 					PartNum: uploadReq.PartNum,
 					Part:    uploadReq.Part,
+				}:
 				}
 			}
-		}(w, partSize)
+		}(partSize)
 	}
 
 	// Gather the responses as they occur and update any
 	// progress bar.
+	allParts := make([]ObjectPart, 0, totalPartsCount)
 	for u := 1; u <= totalPartsCount; u++ {
-		uploadRes := <-uploadedPartsCh
-		if uploadRes.Error != nil {
-			return UploadInfo{}, uploadRes.Error
+		select {
+		case <-ctx.Done():
+			return UploadInfo{}, ctx.Err()
+		case uploadRes := <-uploadedPartsCh:
+			if uploadRes.Error != nil {
+				return UploadInfo{}, uploadRes.Error
+			}
+			allParts = append(allParts, uploadRes.Part)
+			// Update the totalUploadedSize.
+			totalUploadedSize += uploadRes.Size
+			complMultipartUpload.Parts = append(complMultipartUpload.Parts, CompletePart{
+				ETag:              uploadRes.Part.ETag,
+				PartNumber:        uploadRes.Part.PartNumber,
+				ChecksumCRC32:     uploadRes.Part.ChecksumCRC32,
+				ChecksumCRC32C:    uploadRes.Part.ChecksumCRC32C,
+				ChecksumSHA1:      uploadRes.Part.ChecksumSHA1,
+				ChecksumSHA256:    uploadRes.Part.ChecksumSHA256,
+				ChecksumCRC64NVME: uploadRes.Part.ChecksumCRC64NVME,
+				ChecksumMD5:       uploadRes.Part.ChecksumMD5,
+				ChecksumSHA512:    uploadRes.Part.ChecksumSHA512,
+				ChecksumXXHash64:  uploadRes.Part.ChecksumXXHash64,
+				ChecksumXXHash3:   uploadRes.Part.ChecksumXXHash3,
+				ChecksumXXHash128: uploadRes.Part.ChecksumXXHash128,
+			})
 		}
-		// Update the totalUploadedSize.
-		totalUploadedSize += uploadRes.Size
-		// Store the parts to be completed in order.
-		complMultipartUpload.Parts = append(complMultipartUpload.Parts, CompletePart{
-			ETag:       uploadRes.Part.ETag,
-			PartNumber: uploadRes.Part.PartNumber,
-		})
 	}
 
 	// Verify if we uploaded all the data.
@@ -231,7 +276,15 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 	// Sort all completed parts.
 	sort.Sort(completedParts(complMultipartUpload.Parts))
 
-	uploadInfo, err := c.completeMultipartUpload(ctx, bucketName, objectName, uploadID, complMultipartUpload, PutObjectOptions{})
+	opts = PutObjectOptions{
+		ServerSideEncryption: opts.ServerSideEncryption,
+		AutoChecksum:         opts.AutoChecksum,
+	}
+	if withChecksum {
+		applyAutoChecksum(&opts, allParts)
+	}
+
+	uploadInfo, err := c.completeMultipartUpload(ctx, bucketName, objectName, uploadID, complMultipartUpload, opts)
 	if err != nil {
 		return UploadInfo{}, err
 	}
@@ -240,8 +293,9 @@ func (c Client) putObjectMultipartStreamFromReadAt(ctx context.Context, bucketNa
 	return uploadInfo, nil
 }
 
-func (c Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bucketName, objectName string,
-	reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
+func (c *Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bucketName, objectName string,
+	reader io.Reader, size int64, opts PutObjectOptions,
+) (info UploadInfo, err error) {
 	// Input validation.
 	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
 		return UploadInfo{}, err
@@ -271,6 +325,13 @@ func (c Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bu
 		}
 	}()
 
+	// Create checksums
+	// CRC32C is ~50% faster on AMD64 @ 30GB/s
+	customHeader := make(http.Header)
+	crc := opts.AutoChecksum.Hasher()
+	md5Hash := c.md5Hasher()
+	defer md5Hash.Close()
+
 	// Total data read and written to server. should be equal to 'size' at the end of the call.
 	var totalUploadedSize int64
 
@@ -282,45 +343,48 @@ func (c Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bu
 
 	// Avoid declaring variables in the for loop
 	var md5Base64 string
-	var hookReader io.Reader
 
 	// Part number always starts with '1'.
 	var partNumber int
 	for partNumber = 1; partNumber <= totalPartsCount; partNumber++ {
-
 		// Proceed to upload the part.
 		if partNumber == totalPartsCount {
 			partSize = lastPartSize
 		}
 
-		if opts.SendContentMd5 {
-			length, rerr := readFull(reader, buf)
-			if rerr == io.EOF && partNumber > 1 {
-				break
-			}
-
-			if rerr != nil && rerr != io.ErrUnexpectedEOF && err != io.EOF {
-				return UploadInfo{}, rerr
-			}
-
-			// Calculate md5sum.
-			hash := c.md5Hasher()
-			hash.Write(buf[:length])
-			md5Base64 = base64.StdEncoding.EncodeToString(hash.Sum(nil))
-			hash.Close()
-
-			// Update progress reader appropriately to the latest offset
-			// as we read from the source.
-			hookReader = newHook(bytes.NewReader(buf[:length]), opts.Progress)
-		} else {
-			// Update progress reader appropriately to the latest offset
-			// as we read from the source.
-			hookReader = newHook(reader, opts.Progress)
+		length, rerr := readFull(reader, buf)
+		if rerr == io.EOF && partNumber > 1 {
+			break
 		}
 
-		objPart, uerr := c.uploadPart(ctx, bucketName, objectName, uploadID,
-			io.LimitReader(hookReader, partSize),
-			partNumber, md5Base64, "", partSize, opts.ServerSideEncryption)
+		if rerr != nil && rerr != io.ErrUnexpectedEOF && err != io.EOF {
+			return UploadInfo{}, rerr
+		}
+
+		// Calculate md5sum.
+		if opts.SendContentMd5 {
+			md5Hash.Reset()
+			md5Hash.Write(buf[:length])
+			md5Base64 = base64.StdEncoding.EncodeToString(md5Hash.Sum(nil))
+		}
+
+		if opts.AutoChecksum.IsSet() {
+			// Add CRC32C instead.
+			crc.Reset()
+			crc.Write(buf[:length])
+			cSum := crc.Sum(nil)
+			customHeader.Set(opts.AutoChecksum.Key(), base64.StdEncoding.EncodeToString(cSum))
+			customHeader.Set(amzChecksumAlgo, opts.AutoChecksum.String())
+			if opts.AutoChecksum.FullObjectRequested() {
+				customHeader.Set(amzChecksumMode, ChecksumFullObjectMode.String())
+			}
+		}
+
+		// Update progress reader appropriately to the latest offset
+		// as we read from the source.
+		hooked := newHook(bytes.NewReader(buf[:length]), opts.Progress)
+		p := uploadPartParams{bucketName: bucketName, objectName: objectName, uploadID: uploadID, reader: hooked, partNumber: partNumber, md5Base64: md5Base64, size: partSize, sse: opts.ServerSideEncryption, streamSha256: !opts.DisableContentSha256, customHeader: customHeader}
+		objPart, uerr := c.uploadPart(ctx, p)
 		if uerr != nil {
 			return UploadInfo{}, uerr
 		}
@@ -344,21 +408,243 @@ func (c Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bu
 
 	// Loop over total uploaded parts to save them in
 	// Parts array before completing the multipart request.
+	allParts := make([]ObjectPart, 0, len(partsInfo))
 	for i := 1; i < partNumber; i++ {
 		part, ok := partsInfo[i]
 		if !ok {
 			return UploadInfo{}, errInvalidArgument(fmt.Sprintf("Missing part number %d", i))
 		}
+		allParts = append(allParts, part)
 		complMultipartUpload.Parts = append(complMultipartUpload.Parts, CompletePart{
-			ETag:       part.ETag,
-			PartNumber: part.PartNumber,
+			ETag:              part.ETag,
+			PartNumber:        part.PartNumber,
+			ChecksumCRC32:     part.ChecksumCRC32,
+			ChecksumCRC32C:    part.ChecksumCRC32C,
+			ChecksumSHA1:      part.ChecksumSHA1,
+			ChecksumSHA256:    part.ChecksumSHA256,
+			ChecksumCRC64NVME: part.ChecksumCRC64NVME,
+			ChecksumMD5:       part.ChecksumMD5,
+			ChecksumSHA512:    part.ChecksumSHA512,
+			ChecksumXXHash64:  part.ChecksumXXHash64,
+			ChecksumXXHash3:   part.ChecksumXXHash3,
+			ChecksumXXHash128: part.ChecksumXXHash128,
 		})
 	}
 
 	// Sort all completed parts.
 	sort.Sort(completedParts(complMultipartUpload.Parts))
 
-	uploadInfo, err := c.completeMultipartUpload(ctx, bucketName, objectName, uploadID, complMultipartUpload, PutObjectOptions{})
+	opts = PutObjectOptions{
+		ServerSideEncryption: opts.ServerSideEncryption,
+		AutoChecksum:         opts.AutoChecksum,
+	}
+	applyAutoChecksum(&opts, allParts)
+	uploadInfo, err := c.completeMultipartUpload(ctx, bucketName, objectName, uploadID, complMultipartUpload, opts)
+	if err != nil {
+		return UploadInfo{}, err
+	}
+
+	uploadInfo.Size = totalUploadedSize
+	return uploadInfo, nil
+}
+
+// putObjectMultipartStreamParallel uploads opts.NumThreads parts in parallel.
+// This is expected to take opts.PartSize * opts.NumThreads * (GOGC / 100) bytes of buffer.
+func (c *Client) putObjectMultipartStreamParallel(ctx context.Context, bucketName, objectName string,
+	reader io.Reader, opts PutObjectOptions,
+) (info UploadInfo, err error) {
+	// Input validation.
+	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
+		return UploadInfo{}, err
+	}
+
+	if err = s3utils.CheckValidObjectName(objectName); err != nil {
+		return UploadInfo{}, err
+	}
+
+	// Cancel all when an error occurs.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Calculate the optimal parts info for a given size.
+	totalPartsCount, partSize, _, err := OptimalPartInfo(-1, opts.PartSize)
+	if err != nil {
+		return UploadInfo{}, err
+	}
+
+	// Initiates a new multipart request
+	uploadID, err := c.newUploadID(ctx, bucketName, objectName, opts)
+	if err != nil {
+		return UploadInfo{}, err
+	}
+
+	// Aborts the multipart upload if the function returns
+	// any error, since we do not resume we should purge
+	// the parts which have been uploaded to relinquish
+	// storage space.
+	defer func() {
+		if err != nil {
+			c.abortMultipartUpload(ctx, bucketName, objectName, uploadID)
+		}
+	}()
+
+	// Create checksums
+	// CRC32C is ~50% faster on AMD64 @ 30GB/s
+	crc := opts.AutoChecksum.Hasher()
+
+	// Total data read and written to server. should be equal to 'size' at the end of the call.
+	var totalUploadedSize int64
+
+	// Initialize parts uploaded map.
+	partsInfo := make(map[int]ObjectPart)
+
+	// Create a buffer.
+	nBuffers := int64(opts.NumThreads)
+	bufs := make(chan []byte, nBuffers)
+	all := make([]byte, nBuffers*partSize)
+	for i := int64(0); i < nBuffers; i++ {
+		bufs <- all[i*partSize : i*partSize+partSize]
+	}
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	errCh := make(chan error, opts.NumThreads)
+
+	reader = newHook(reader, opts.Progress)
+
+	// Part number always starts with '1'.
+	var partNumber int
+	for partNumber = 1; partNumber <= totalPartsCount; partNumber++ {
+		// Proceed to upload the part.
+		var buf []byte
+		select {
+		case buf = <-bufs:
+		case err = <-errCh:
+			cancel()
+			wg.Wait()
+			return UploadInfo{}, err
+		}
+
+		if int64(len(buf)) != partSize {
+			return UploadInfo{}, fmt.Errorf("read buffer < %d than expected partSize: %d", len(buf), partSize)
+		}
+
+		length, rerr := readFull(reader, buf)
+		if rerr == io.EOF && partNumber > 1 {
+			// Done
+			break
+		}
+
+		if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+			cancel()
+			wg.Wait()
+			return UploadInfo{}, rerr
+		}
+
+		wg.Add(1)
+		go func(partNumber int) {
+			// Calculate md5sum.
+			customHeader := make(http.Header)
+			if opts.AutoChecksum.IsSet() {
+				// Add Checksum instead.
+				crc.Reset()
+				crc.Write(buf[:length])
+				cSum := crc.Sum(nil)
+				customHeader.Set(opts.AutoChecksum.Key(), base64.StdEncoding.EncodeToString(cSum))
+				customHeader.Set(amzChecksumAlgo, opts.AutoChecksum.String())
+				if opts.AutoChecksum.FullObjectRequested() {
+					customHeader.Set(amzChecksumMode, ChecksumFullObjectMode.String())
+				}
+			}
+
+			// Avoid declaring variables in the for loop
+			var md5Base64 string
+
+			if opts.SendContentMd5 {
+				md5Hash := c.md5Hasher()
+				md5Hash.Write(buf[:length])
+				md5Base64 = base64.StdEncoding.EncodeToString(md5Hash.Sum(nil))
+				md5Hash.Close()
+			}
+
+			defer wg.Done()
+			p := uploadPartParams{
+				bucketName:   bucketName,
+				objectName:   objectName,
+				uploadID:     uploadID,
+				reader:       bytes.NewReader(buf[:length]),
+				partNumber:   partNumber,
+				md5Base64:    md5Base64,
+				size:         int64(length),
+				sse:          opts.ServerSideEncryption,
+				streamSha256: !opts.DisableContentSha256,
+				customHeader: customHeader,
+			}
+			objPart, uerr := c.uploadPart(ctx, p)
+			if uerr != nil {
+				errCh <- uerr
+				return
+			}
+
+			// Save successfully uploaded part metadata.
+			mu.Lock()
+			partsInfo[partNumber] = objPart
+			mu.Unlock()
+
+			// Send buffer back so it can be reused.
+			bufs <- buf
+		}(partNumber)
+
+		// Save successfully uploaded size.
+		totalUploadedSize += int64(length)
+	}
+	wg.Wait()
+
+	// Collect any error
+	select {
+	case err = <-errCh:
+		return UploadInfo{}, err
+	default:
+	}
+
+	// Complete multipart upload.
+	var complMultipartUpload completeMultipartUpload
+
+	// Loop over total uploaded parts to save them in
+	// Parts array before completing the multipart request.
+	allParts := make([]ObjectPart, 0, len(partsInfo))
+	for i := 1; i < partNumber; i++ {
+		part, ok := partsInfo[i]
+		if !ok {
+			return UploadInfo{}, errInvalidArgument(fmt.Sprintf("Missing part number %d", i))
+		}
+		allParts = append(allParts, part)
+		complMultipartUpload.Parts = append(complMultipartUpload.Parts, CompletePart{
+			ETag:              part.ETag,
+			PartNumber:        part.PartNumber,
+			ChecksumCRC32:     part.ChecksumCRC32,
+			ChecksumCRC32C:    part.ChecksumCRC32C,
+			ChecksumSHA1:      part.ChecksumSHA1,
+			ChecksumSHA256:    part.ChecksumSHA256,
+			ChecksumCRC64NVME: part.ChecksumCRC64NVME,
+			ChecksumMD5:       part.ChecksumMD5,
+			ChecksumSHA512:    part.ChecksumSHA512,
+			ChecksumXXHash64:  part.ChecksumXXHash64,
+			ChecksumXXHash3:   part.ChecksumXXHash3,
+			ChecksumXXHash128: part.ChecksumXXHash128,
+		})
+	}
+
+	// Sort all completed parts.
+	sort.Sort(completedParts(complMultipartUpload.Parts))
+
+	opts = PutObjectOptions{
+		ServerSideEncryption: opts.ServerSideEncryption,
+		AutoChecksum:         opts.AutoChecksum,
+	}
+	applyAutoChecksum(&opts, allParts)
+
+	uploadInfo, err := c.completeMultipartUpload(ctx, bucketName, objectName, uploadID, complMultipartUpload, opts)
 	if err != nil {
 		return UploadInfo{}, err
 	}
@@ -369,7 +655,7 @@ func (c Client) putObjectMultipartStreamOptionalChecksum(ctx context.Context, bu
 
 // putObject special function used Google Cloud Storage. This special function
 // is used for Google Cloud Storage since Google's multipart API is not S3 compatible.
-func (c Client) putObject(ctx context.Context, bucketName, objectName string, reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
+func (c *Client) putObject(ctx context.Context, bucketName, objectName string, reader io.Reader, size int64, opts PutObjectOptions) (info UploadInfo, err error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return UploadInfo{}, err
@@ -388,6 +674,7 @@ func (c Client) putObject(ctx context.Context, bucketName, objectName string, re
 		return UploadInfo{}, errInvalidArgument("MD5Sum cannot be calculated with size '-1'")
 	}
 
+	var readSeeker io.Seeker
 	if size > 0 {
 		if isReadAt(reader) && !isObject(reader) {
 			seeker, ok := reader.(io.Seeker)
@@ -397,40 +684,54 @@ func (c Client) putObject(ctx context.Context, bucketName, objectName string, re
 					return UploadInfo{}, errInvalidArgument(err.Error())
 				}
 				reader = io.NewSectionReader(reader.(io.ReaderAt), offset, size)
+				readSeeker = reader.(io.Seeker)
 			}
 		}
 	}
 
 	var md5Base64 string
 	if opts.SendContentMd5 {
-		// Create a buffer.
-		buf := make([]byte, size)
-
-		length, rErr := readFull(reader, buf)
-		if rErr != nil && rErr != io.ErrUnexpectedEOF && rErr != io.EOF {
-			return UploadInfo{}, rErr
-		}
-
 		// Calculate md5sum.
 		hash := c.md5Hasher()
-		hash.Write(buf[:length])
+
+		if readSeeker != nil {
+			if _, err := io.Copy(hash, reader); err != nil {
+				return UploadInfo{}, err
+			}
+			// Seek back to beginning of io.NewSectionReader's offset.
+			_, err = readSeeker.Seek(0, io.SeekStart)
+			if err != nil {
+				return UploadInfo{}, errInvalidArgument(err.Error())
+			}
+		} else {
+			// Create a buffer.
+			buf := make([]byte, size)
+
+			length, err := readFull(reader, buf)
+			if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+				return UploadInfo{}, err
+			}
+
+			hash.Write(buf[:length])
+			reader = bytes.NewReader(buf[:length])
+		}
+
 		md5Base64 = base64.StdEncoding.EncodeToString(hash.Sum(nil))
-		reader = bytes.NewReader(buf[:length])
 		hash.Close()
 	}
 
 	// Update progress reader appropriately to the latest offset as we
 	// read from the source.
-	readSeeker := newHook(reader, opts.Progress)
+	progressReader := newHook(reader, opts.Progress)
 
 	// This function does not calculate sha256 and md5sum for payload.
 	// Execute put object.
-	return c.putObjectDo(ctx, bucketName, objectName, readSeeker, md5Base64, "", size, opts)
+	return c.putObjectDo(ctx, bucketName, objectName, progressReader, md5Base64, "", size, opts)
 }
 
 // putObjectDo - executes the put object http operation.
 // NOTE: You must have WRITE permissions on a bucket to add an object to it.
-func (c Client) putObjectDo(ctx context.Context, bucketName, objectName string, reader io.Reader, md5Base64, sha256Hex string, size int64, opts PutObjectOptions) (UploadInfo, error) {
+func (c *Client) putObjectDo(ctx context.Context, bucketName, objectName string, reader io.Reader, md5Base64, sha256Hex string, size int64, opts PutObjectOptions) (UploadInfo, error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return UploadInfo{}, err
@@ -450,10 +751,30 @@ func (c Client) putObjectDo(ctx context.Context, bucketName, objectName string, 
 		contentLength:    size,
 		contentMD5Base64: md5Base64,
 		contentSHA256Hex: sha256Hex,
+		streamSha256:     !opts.DisableContentSha256,
 	}
+	// Add CRC when client supports it, MD5 is not set, not Google and we don't add SHA256 to chunks.
+	addCrc := c.trailingHeaderSupport && md5Base64 == "" && !s3utils.IsGoogleEndpoint(*c.endpointURL) && (opts.DisableContentSha256 || c.secure)
+	if opts.Checksum.IsSet() {
+		reqMetadata.addCrc = &opts.Checksum
+	} else if addCrc {
+		// If user has added checksums, don't add them ourselves.
+		for k := range opts.UserMetadata {
+			if strings.HasPrefix(strings.ToLower(k), "x-amz-checksum-") {
+				addCrc = false
+			}
+		}
+		if addCrc {
+			opts.AutoChecksum.SetDefault(ChecksumFullObjectCRC32C)
+			reqMetadata.addCrc = &opts.AutoChecksum
+		}
+	}
+
 	if opts.Internal.SourceVersionID != "" {
-		if _, err := uuid.Parse(opts.Internal.SourceVersionID); err != nil {
-			return UploadInfo{}, errInvalidArgument(err.Error())
+		if opts.Internal.SourceVersionID != nullVersionID {
+			if _, err := uuid.Parse(opts.Internal.SourceVersionID); err != nil {
+				return UploadInfo{}, errInvalidArgument(err.Error())
+			}
 		}
 		urlValues := make(url.Values)
 		urlValues.Set("versionId", opts.Internal.SourceVersionID)
@@ -474,14 +795,27 @@ func (c Client) putObjectDo(ctx context.Context, bucketName, objectName string, 
 
 	// extract lifecycle expiry date and rule ID
 	expTime, ruleID := amzExpirationToExpiryDateRuleID(resp.Header.Get(amzExpiration))
-
+	h := resp.Header
 	return UploadInfo{
 		Bucket:           bucketName,
 		Key:              objectName,
-		ETag:             trimEtag(resp.Header.Get("ETag")),
-		VersionID:        resp.Header.Get(amzVersionID),
+		ETag:             trimEtag(h.Get("ETag")),
+		VersionID:        h.Get(amzVersionID),
 		Size:             size,
 		Expiration:       expTime,
 		ExpirationRuleID: ruleID,
+
+		// Checksum values
+		ChecksumCRC32:     h.Get(ChecksumCRC32.Key()),
+		ChecksumCRC32C:    h.Get(ChecksumCRC32C.Key()),
+		ChecksumSHA1:      h.Get(ChecksumSHA1.Key()),
+		ChecksumSHA256:    h.Get(ChecksumSHA256.Key()),
+		ChecksumCRC64NVME: h.Get(ChecksumCRC64NVME.Key()),
+		ChecksumMD5:       h.Get(ChecksumMD5.Key()),
+		ChecksumSHA512:    h.Get(ChecksumSHA512.Key()),
+		ChecksumXXHash64:  h.Get(ChecksumXXHash64.Key()),
+		ChecksumXXHash3:   h.Get(ChecksumXXHash3.Key()),
+		ChecksumXXHash128: h.Get(ChecksumXXHash128.Key()),
+		ChecksumMode:      h.Get(ChecksumFullObjectMode.Key()),
 	}, nil
 }

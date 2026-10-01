@@ -22,22 +22,37 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7/pkg/replication"
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
-// RemoveBucketReplication removes a replication config on an existing bucket.
-func (c Client) RemoveBucketReplication(ctx context.Context, bucketName string) error {
+// RemoveBucketReplication removes the replication configuration from an existing bucket.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns an error if the operation fails.
+func (c *Client) RemoveBucketReplication(ctx context.Context, bucketName string) error {
 	return c.removeBucketReplication(ctx, bucketName)
 }
 
-// SetBucketReplication sets a replication config on an existing bucket.
-func (c Client) SetBucketReplication(ctx context.Context, bucketName string, cfg replication.Config) error {
+// SetBucketReplication sets the replication configuration on an existing bucket.
+// If the provided configuration is empty, this method removes the existing replication configuration.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - cfg: Replication configuration to apply
+//
+// Returns an error if the operation fails.
+func (c *Client) SetBucketReplication(ctx context.Context, bucketName string, cfg replication.Config) error {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return err
@@ -52,7 +67,7 @@ func (c Client) SetBucketReplication(ctx context.Context, bucketName string, cfg
 }
 
 // Saves a new bucket replication.
-func (c Client) putBucketReplication(ctx context.Context, bucketName string, cfg replication.Config) error {
+func (c *Client) putBucketReplication(ctx context.Context, bucketName string, cfg replication.Config) error {
 	// Get resources properly escaped and lined up before
 	// using them in http request.
 	urlValues := make(url.Values)
@@ -85,7 +100,7 @@ func (c Client) putBucketReplication(ctx context.Context, bucketName string, cfg
 }
 
 // Remove replication from a bucket.
-func (c Client) removeBucketReplication(ctx context.Context, bucketName string) error {
+func (c *Client) removeBucketReplication(ctx context.Context, bucketName string) error {
 	// Get resources properly escaped and lined up before
 	// using them in http request.
 	urlValues := make(url.Values)
@@ -101,12 +116,21 @@ func (c Client) removeBucketReplication(ctx context.Context, bucketName string) 
 	if err != nil {
 		return err
 	}
+	if resp.StatusCode != http.StatusOK {
+		return httpRespToErrorResponse(resp, bucketName, "")
+	}
 	return nil
 }
 
-// GetBucketReplication fetches bucket replication configuration.If config is not
-// found, returns empty config with nil error.
-func (c Client) GetBucketReplication(ctx context.Context, bucketName string) (cfg replication.Config, err error) {
+// GetBucketReplication retrieves the bucket replication configuration.
+// If no replication configuration is found, returns an empty config with nil error.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns the replication configuration or an error if the operation fails.
+func (c *Client) GetBucketReplication(ctx context.Context, bucketName string) (cfg replication.Config, err error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return cfg, err
@@ -123,7 +147,7 @@ func (c Client) GetBucketReplication(ctx context.Context, bucketName string) (cf
 }
 
 // Request server for current bucket replication config.
-func (c Client) getBucketReplication(ctx context.Context, bucketName string) (cfg replication.Config, err error) {
+func (c *Client) getBucketReplication(ctx context.Context, bucketName string) (cfg replication.Config, err error) {
 	// Get resources properly escaped and lined up before
 	// using them in http request.
 	urlValues := make(url.Values)
@@ -151,8 +175,14 @@ func (c Client) getBucketReplication(ctx context.Context, bucketName string) (cf
 	return cfg, nil
 }
 
-// GetBucketReplicationMetrics fetches bucket replication status metrics
-func (c Client) GetBucketReplicationMetrics(ctx context.Context, bucketName string) (s replication.Metrics, err error) {
+// GetBucketReplicationMetrics retrieves bucket replication status metrics.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns the replication metrics or an error if the operation fails.
+func (c *Client) GetBucketReplicationMetrics(ctx context.Context, bucketName string) (s replication.Metrics, err error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return s, err
@@ -176,7 +206,7 @@ func (c Client) GetBucketReplicationMetrics(ctx context.Context, bucketName stri
 	if resp.StatusCode != http.StatusOK {
 		return s, httpRespToErrorResponse(resp, bucketName, "")
 	}
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return s, err
 	}
@@ -187,12 +217,53 @@ func (c Client) GetBucketReplicationMetrics(ctx context.Context, bucketName stri
 	return s, nil
 }
 
+// mustGetUUID - get a random UUID.
+func mustGetUUID() string {
+	u, err := uuid.NewRandom()
+	if err != nil {
+		return ""
+	}
+	return u.String()
+}
+
+// ResetBucketReplication initiates replication of previously replicated objects.
+// This requires ExistingObjectReplication to be enabled in the replication configuration.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - olderThan: Only replicate objects older than this duration (0 for all objects)
+//
+// Returns a reset ID that can be used to track the operation, or an error if the operation fails.
+func (c *Client) ResetBucketReplication(ctx context.Context, bucketName string, olderThan time.Duration) (rID string, err error) {
+	rID = mustGetUUID()
+	_, err = c.resetBucketReplicationOnTarget(ctx, bucketName, olderThan, "", rID)
+	if err != nil {
+		return rID, err
+	}
+	return rID, nil
+}
+
+// ResetBucketReplicationOnTarget initiates replication of previously replicated objects to a specific target.
+// This requires ExistingObjectReplication to be enabled in the replication configuration.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - olderThan: Only replicate objects older than this duration (0 for all objects)
+//   - tgtArn: ARN of the target to reset replication for
+//
+// Returns resync target information or an error if the operation fails.
+func (c *Client) ResetBucketReplicationOnTarget(ctx context.Context, bucketName string, olderThan time.Duration, tgtArn string) (replication.ResyncTargetsInfo, error) {
+	return c.resetBucketReplicationOnTarget(ctx, bucketName, olderThan, tgtArn, mustGetUUID())
+}
+
 // ResetBucketReplication kicks off replication of previously replicated objects if ExistingObjectReplication
 // is enabled in the replication config
-func (c Client) ResetBucketReplication(ctx context.Context, bucketName string, olderThan time.Duration) (resetID string, err error) {
+func (c *Client) resetBucketReplicationOnTarget(ctx context.Context, bucketName string, olderThan time.Duration, tgtArn, resetID string) (rinfo replication.ResyncTargetsInfo, err error) {
 	// Input validation.
-	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
-		return "", err
+	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
+		return rinfo, err
 	}
 	// Get resources properly escaped and lined up before
 	// using them in http request.
@@ -201,7 +272,10 @@ func (c Client) ResetBucketReplication(ctx context.Context, bucketName string, o
 	if olderThan > 0 {
 		urlValues.Set("older-than", olderThan.String())
 	}
-
+	if tgtArn != "" {
+		urlValues.Set("arn", tgtArn)
+	}
+	urlValues.Set("reset-id", resetID)
 	// Execute GET on bucket to get replication config.
 	resp, err := c.executeMethod(ctx, http.MethodPut, requestMetadata{
 		bucketName:  bucketName,
@@ -210,19 +284,175 @@ func (c Client) ResetBucketReplication(ctx context.Context, bucketName string, o
 
 	defer closeResponse(resp)
 	if err != nil {
-		return "", err
+		return rinfo, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", httpRespToErrorResponse(resp, bucketName, "")
+		return rinfo, httpRespToErrorResponse(resp, bucketName, "")
 	}
-	respBytes, err := ioutil.ReadAll(resp.Body)
+
+	if err = json.NewDecoder(resp.Body).Decode(&rinfo); err != nil {
+		return rinfo, err
+	}
+	return rinfo, nil
+}
+
+// GetBucketReplicationResyncStatus retrieves the status of a replication resync operation.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - arn: ARN of the replication target (empty string for all targets)
+//
+// Returns resync status information or an error if the operation fails.
+func (c *Client) GetBucketReplicationResyncStatus(ctx context.Context, bucketName, arn string) (rinfo replication.ResyncTargetsInfo, err error) {
+	// Input validation.
+	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
+		return rinfo, err
+	}
+	// Get resources properly escaped and lined up before
+	// using them in http request.
+	urlValues := make(url.Values)
+	urlValues.Set("replication-reset-status", "")
+	if arn != "" {
+		urlValues.Set("arn", arn)
+	}
+	// Execute GET on bucket to get replication config.
+	resp, err := c.executeMethod(ctx, http.MethodGet, requestMetadata{
+		bucketName:  bucketName,
+		queryValues: urlValues,
+	})
+
+	defer closeResponse(resp)
+	if err != nil {
+		return rinfo, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return rinfo, httpRespToErrorResponse(resp, bucketName, "")
+	}
+
+	if err = json.NewDecoder(resp.Body).Decode(&rinfo); err != nil {
+		return rinfo, err
+	}
+	return rinfo, nil
+}
+
+// CancelBucketReplicationResync cancels an in-progress replication resync operation.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - tgtArn: ARN of the replication target (empty string for all targets)
+//
+// Returns the ID of the canceled resync operation or an error if the operation fails.
+func (c *Client) CancelBucketReplicationResync(ctx context.Context, bucketName string, tgtArn string) (id string, err error) {
+	// Input validation.
+	if err = s3utils.CheckValidBucketName(bucketName); err != nil {
+		return id, err
+	}
+	// Get resources properly escaped and lined up before
+	// using them in http request.
+	urlValues := make(url.Values)
+	urlValues.Set("replication-reset-cancel", "")
+	if tgtArn != "" {
+		urlValues.Set("arn", tgtArn)
+	}
+	// Execute GET on bucket to get replication config.
+	resp, err := c.executeMethod(ctx, http.MethodPut, requestMetadata{
+		bucketName:  bucketName,
+		queryValues: urlValues,
+	})
+
+	defer closeResponse(resp)
+	if err != nil {
+		return id, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return id, httpRespToErrorResponse(resp, bucketName, "")
+	}
+	strBuf, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 
-	if err := json.Unmarshal(respBytes, &resetID); err != nil {
-		return "", err
+	id = string(strBuf)
+	return id, nil
+}
+
+// GetBucketReplicationMetricsV2 retrieves bucket replication status metrics using the V2 API.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns the V2 replication metrics or an error if the operation fails.
+func (c *Client) GetBucketReplicationMetricsV2(ctx context.Context, bucketName string) (s replication.MetricsV2, err error) {
+	// Input validation.
+	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
+		return s, err
 	}
-	return resetID, nil
+	// Get resources properly escaped and lined up before
+	// using them in http request.
+	urlValues := make(url.Values)
+	urlValues.Set("replication-metrics", "2")
+
+	// Execute GET on bucket to get replication metrics.
+	resp, err := c.executeMethod(ctx, http.MethodGet, requestMetadata{
+		bucketName:  bucketName,
+		queryValues: urlValues,
+	})
+
+	defer closeResponse(resp)
+	if err != nil {
+		return s, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return s, httpRespToErrorResponse(resp, bucketName, "")
+	}
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return s, err
+	}
+
+	if err := json.Unmarshal(respBytes, &s); err != nil {
+		return s, err
+	}
+	return s, nil
+}
+
+// CheckBucketReplication validates whether replication is properly configured for a bucket.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns nil if replication is valid, or an error describing the validation failure.
+func (c *Client) CheckBucketReplication(ctx context.Context, bucketName string) (err error) {
+	// Input validation.
+	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
+		return err
+	}
+	// Get resources properly escaped and lined up before
+	// using them in http request.
+	urlValues := make(url.Values)
+	urlValues.Set("replication-check", "")
+
+	// Execute GET on bucket to get replication config.
+	resp, err := c.executeMethod(ctx, http.MethodGet, requestMetadata{
+		bucketName:  bucketName,
+		queryValues: urlValues,
+	})
+
+	defer closeResponse(resp)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return httpRespToErrorResponse(resp, bucketName, "")
+	}
+	return nil
 }

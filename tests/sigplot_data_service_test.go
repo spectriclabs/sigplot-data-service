@@ -3,15 +3,19 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
-	"net/http"
-	"net/http/httptest"
-
 	"encoding/json"
 	"io/ioutil"
 	"math"
-	"os"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"testing"
+
+	"github.com/labstack/echo/v4"
+	"github.com/spectriclabs/sigplot-data-service/internal/api"
+	"github.com/spectriclabs/sigplot-data-service/internal/bluefile"
+	"github.com/spectriclabs/sigplot-data-service/internal/config"
 )
 
 // Tests use the data file, "mydata_SB_600_600.tmp". This file is a 600 by 600 scaler byte file where it is 0 for the first 100  lines and 10 for the last 100 lines.
@@ -19,49 +23,56 @@ import (
 // For example, lines 0-59, are 0, 60-119 are 1 ... 540-599 are 9.
 // Test files of "mydata_XX_60_60.tmp" are the same format but on 60x 60 in size.
 
-func FSHandler(t *testing.T, locationName string, expectedReturnCode int) []byte {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
-	// Create a request to pass to our handler.
-
-	sdsurl := "/sds/fs/" + locationName
-	//t.Log("url", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	if err != nil {
-		t.Fatal(err)
+func newTestAPI(t *testing.T) *api.API {
+	cfg := config.Config{
+		UseCache:         false,
+		CacheLocation:    t.TempDir() + "/",
+		MaxBytesZminZmax: 1000000,
+		LocationDetails: []config.Location{
+			{LocationName: "ServiceDir", LocationType: "localFile", Path: "../"},
+			{LocationName: "TestDir", LocationType: "localFile", Path: "./data"},
+			{LocationName: "TestsDir", LocationType: "localFile", Path: "."},
+		},
 	}
-
-	SetupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	headerServer := &routerServer{}
-	headerServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
-	}
-	return rr.Body.Bytes()
+	return api.NewSDSAPI(&cfg)
 }
-func TestBaddModeHandler(t *testing.T) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
-	// Create a request to pass to our handler.
 
-	sdsurl := "/sds/bad/"
-	//t.Log("url", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	if err != nil {
-		t.Fatal(err)
+func newTestServer(t *testing.T) (*echo.Echo, *api.API) {
+	a := newTestAPI(t)
+	e := echo.New()
+	e.GET("/sds/fs", a.GetFileLocations)
+	e.GET("/sds/fs/:location", a.GetFileOrDirectory)
+	e.GET("/sds/fs/:location/*", a.GetFileOrDirectory)
+	e.GET("/sds/hdr/:location/*", a.GetBluefileHeader)
+	e.GET("/sds/rdstile/:tileXsize/:tileYsize/:decXMode/:decYMode/:tileX/:tileY/:location/*", a.GetRDSTile)
+	e.GET("/sds/:cuttype/:x1/:y1/:x2/:y2/:outxsize/:outysize/:location/*", a.GetRDSXYCut)
+	e.GET("/sds/lds/:x1/:x2/:outxsize/:outzsize/:location/*", a.GetLDS)
+	return e, a
+}
+
+func FSHandler(t *testing.T, locationName string, expectedReturnCode int) []byte {
+	e, _ := newTestServer(t)
+	sdsurl := "/sds/fs/" + locationName
+	if locationName == "" {
+		sdsurl = "/sds/fs"
 	}
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
 
-	setupConfigLogCache()
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
+	}
+	return rec.Body.Bytes()
+}
 
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	headerServer := &routerServer{}
-	headerServer.ServeHTTP(rr, req)
-
-	if rr.Code != 400 {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, 400)
+func TestBaddModeHandler(t *testing.T) {
+	e, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/sds/fs/badlocation/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, 400)
 	}
 }
 
@@ -70,21 +81,20 @@ type fileObj struct {
 	Type     string `json:"type"`
 }
 
-func checkfiles(t *testing.T, returnBytes []byte) {
+func checkfiles(t *testing.T, returnBytes []byte, dir string) {
 	var fileDetails []fileObj
 	marshalError := json.Unmarshal(returnBytes, &fileDetails)
 	if marshalError != nil {
 		t.Errorf("File List Returned did not unmarshal to the correct type")
 	}
-	files, err := ioutil.ReadDir("./tests")
+	files, err := ioutil.ReadDir(dir)
 	if err != nil {
-		t.Errorf("Error Reading Testing directory")
+		t.Errorf("Error Reading directory %s", dir)
 	}
 	var found bool
 	for _, osfile := range files {
 		found = false
 		for _, jsonfile := range fileDetails {
-			//log.Println("Looking for:",osfile.Name(), "found:", jsonfile.Filename )
 			if osfile.Name() == jsonfile.Filename {
 				found = true
 				if (osfile.IsDir() || jsonfile.Type == "directory") && !(osfile.IsDir() && jsonfile.Type == "directory") {
@@ -95,33 +105,31 @@ func checkfiles(t *testing.T, returnBytes []byte) {
 		if !found {
 			t.Errorf("File %v not found in return data", osfile.Name())
 		}
-
 	}
 }
 
 func TestDirectoryHandler(t *testing.T) {
 	locationName := "TestDir/"
 	returnData := FSHandler(t, locationName, 200)
-	checkfiles(t, returnData)
-
+	checkfiles(t, returnData, "./data")
 }
 
 func TestDirectoryHandler2(t *testing.T) {
 	locationName := "TestDir"
 	returnData := FSHandler(t, locationName, 200)
-	checkfiles(t, returnData)
+	checkfiles(t, returnData, "./data")
 }
 
 func TestDirectoryHandler3(t *testing.T) {
 	locationName := "ServiceDir/tests/"
 	returnData := FSHandler(t, locationName, 200)
-	checkfiles(t, returnData)
+	checkfiles(t, returnData, ".")
 }
 
 func TestDirectoryHandler4(t *testing.T) {
 	locationName := "ServiceDir/tests"
 	returnData := FSHandler(t, locationName, 200)
-	checkfiles(t, returnData)
+	checkfiles(t, returnData, ".")
 }
 
 func TestDirectoryHandlerBad(t *testing.T) {
@@ -138,57 +146,47 @@ func TestFileHandler(t *testing.T) {
 }
 
 func TestLocationListHandler(t *testing.T) {
-	locationName := ""
-	returnData := FSHandler(t, locationName, 200)
-	var locationDetails []Location
-	marshalError := json.Unmarshal(returnData, &locationDetails)
-	if marshalError != nil {
-		t.Errorf("Error with Rturn Data")
+	e, a := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/sds/fs", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, 200)
 	}
-	for i := 0; i < len(configuration.LocationDetails); i++ {
-		if configuration.LocationDetails[i] != locationDetails[i] {
-			t.Errorf("Location Details Don't match Configuration.")
-		}
+	var locationDetails []config.Location
+	marshalError := json.Unmarshal(rec.Body.Bytes(), &locationDetails)
+	if marshalError != nil {
+		t.Errorf("Error with Return Data")
+	}
+	if len(locationDetails) != len(a.Cfg.LocationDetails) {
+		t.Errorf("Location Details count mismatch: got %d, want %d", len(locationDetails), len(a.Cfg.LocationDetails))
 	}
 }
 
 func HDRHandler(t *testing.T, locationName, filename string, expectedReturnCode int) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
-	// Create a request to pass to our handler.
+	e, _ := newTestServer(t)
 	sdsurl := "/sds/hdr/" + locationName + "/" + filename
-	//t.Log("url", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	headerServer := &routerServer{}
-	headerServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
-	}
-	if rr.Code == 400 {
+	if rec.Code != 200 {
 		return
 	}
 
-	var fileHeaderData BlueHeaderShortenedFields
-	marshalError := json.Unmarshal(rr.Body.Bytes(), &fileHeaderData)
+	var fileHeaderData bluefile.BlueHeaderShortenedFields
+	marshalError := json.Unmarshal(rec.Body.Bytes(), &fileHeaderData)
 	if marshalError != nil {
 		t.Errorf("Error unMarshaling JSON from hdr return: %v", marshalError)
 	}
-	//Check some of the header fields
-	if fileHeaderData.Version != "BLUE" || fileHeaderData.Data_start != 512 ||
-		fileHeaderData.Data_size != 3600 || fileHeaderData.File_type != 2000 ||
+	if fileHeaderData.Version != "BLUE" || fileHeaderData.DataStart != 512 ||
+		fileHeaderData.DataSize != 3600 || fileHeaderData.FileType != 2000 ||
 		fileHeaderData.Subsize != 60 || fileHeaderData.Xdelta != 1 {
 		t.Errorf("Incorrect Header Data Returned")
 	}
-
 }
 
 func TestHDRHandlerTestDir(t *testing.T) {
@@ -201,33 +199,24 @@ func TestHDRHandlerBad(t *testing.T) {
 }
 func TestHDRHandlerBadFileType(t *testing.T) {
 	filename := "sdsTestConfig.json"
-	HDRHandler(t, "TestDir", filename, 400)
+	HDRHandler(t, "TestsDir", filename, 400)
 }
 
 func RDSTileHandler(t *testing.T, filename string, tileXsize, tileYsize, decX, decY, tileX, tileY int, outfmt string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/rdstile/" + strconv.Itoa(tileXsize) + "/" + strconv.Itoa(tileYsize) + "/" + strconv.Itoa(decX) + "/" + strconv.Itoa(decY) + "/" + strconv.Itoa(tileX) + "/" + strconv.Itoa(tileY) + "/" + locationName + "/" + filename + "?outfmt=" + outfmt
 
-	req, err := http.NewRequest("GET", sdsurl, nil)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
 
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
 	for i := 0; i < len(expectedReturn); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+		if i >= len(rec.Body.Bytes()) || rec.Body.Bytes()[i] != expectedReturn[i] {
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
 }
@@ -285,12 +274,10 @@ func TestPartialTile(t *testing.T) {
 }
 
 func BaseicRDSHandlerColormap(t *testing.T, filename string, x1, y1, x2, y2, outxsize, outysize int, transform, cxmode, colormap, zmin, zmax string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outysize) + "/" + locationName + "/" + filename
-
-	sdsurl = sdsurl + "?transform=" + transform + "&cxmode=" + cxmode + "&colormap=" + colormap + "&outfmt=RGBA"
-
+	sdsurl = sdsurl + "?transform=" + transform + "&cxmode=" + cxmode + "&colormap=" + url.QueryEscape(colormap) + "&outfmt=RGBA"
 	if zmin != "skip" {
 		sdsurl = sdsurl + "&zmin=" + zmin
 	}
@@ -299,195 +286,148 @@ func BaseicRDSHandlerColormap(t *testing.T, filename string, x1, y1, x2, y2, out
 	}
 
 	t.Log("url:", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != 200 {
+		return
 	}
-
-	for i := 0; i < len(rr.Body.Bytes()); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+	for i := 0; i < len(rec.Body.Bytes()); i++ {
+		if rec.Body.Bytes()[i] != expectedReturn[i] {
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
-
 }
 
 func BaseicRDSHandler(t *testing.T, filename string, x1, y1, x2, y2, outxsize, outysize int, transform, cxmode, outfmt string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outysize) + "/" + locationName + "/" + filename
 	sdsurl = sdsurl + "?transform=" + transform + "&cxmode=" + cxmode + "&outfmt=" + outfmt
 
 	t.Log("url:", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != 200 {
+		return
 	}
-
-	if len(rr.Body.Bytes()) != len(expectedReturn) {
-		t.Errorf("Did not get correct length return. Got %v epected %v ", len(rr.Body.Bytes()), len(expectedReturn))
+	if len(rec.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v expected %v", len(rec.Body.Bytes()), len(expectedReturn))
 	}
-
 	var testFail bool = false
-	for i := 0; i < len(rr.Body.Bytes()); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
+	for i := 0; i < len(rec.Body.Bytes()) && i < len(expectedReturn); i++ {
+		if rec.Body.Bytes()[i] != expectedReturn[i] {
 			testFail = true
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
-
 	if testFail {
 		t.Errorf("Values did not match expected data")
 	}
-
 }
 
 func BaseicRDSHandlerSubsize(t *testing.T, filename string, x1, y1, x2, y2, outxsize, outysize, subsize int, transform, cxmode, outfmt string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/rds/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outysize) + "/" + locationName + "/" + filename
 	sdsurl = sdsurl + "?transform=" + transform + "&cxmode=" + cxmode + "&outfmt=" + outfmt + "&subsize=" + strconv.Itoa(subsize)
 
 	t.Log("url:", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != 200 {
+		return
 	}
-
-	if len(rr.Body.Bytes()) != len(expectedReturn) {
-		t.Errorf("Did not get correct length return. Got %v epected %v ", len(rr.Body.Bytes()), len(expectedReturn))
+	if len(rec.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v expected %v", len(rec.Body.Bytes()), len(expectedReturn))
 	}
-
 	var testFail bool = false
-	for i := 0; i < len(rr.Body.Bytes()); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
+	for i := 0; i < len(rec.Body.Bytes()) && i < len(expectedReturn); i++ {
+		if rec.Body.Bytes()[i] != expectedReturn[i] {
 			testFail = true
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
-
 	if testFail {
 		t.Errorf("Values did not match expected data")
 	}
-
 }
 func BaseicRDSxCutHandler(t *testing.T, filename, mode string, x1, y1, x2, y2, outxsize, outzsize int, cxmode string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/" + mode + "/" + strconv.Itoa(x1) + "/" + strconv.Itoa(y1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(y2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outzsize) + "/" + locationName + "/" + filename
 	sdsurl = sdsurl + "?cxmode=" + cxmode
 
 	t.Log("url:", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	//handler := http.HandlerFunc(fileHeaderServer)
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != 200 {
+		return
 	}
-
-	if len(rr.Body.Bytes()) != len(expectedReturn) {
-		t.Errorf("Did not get correct length return. Got %v epected %v ", len(rr.Body.Bytes()), len(expectedReturn))
+	if len(rec.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v expected %v", len(rec.Body.Bytes()), len(expectedReturn))
 	}
-
 	var testFail bool = false
-	for i := 0; i < len(rr.Body.Bytes()); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
+	for i := 0; i < len(rec.Body.Bytes()) && i < len(expectedReturn); i++ {
+		if rec.Body.Bytes()[i] != expectedReturn[i] {
 			testFail = true
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
-
 	if testFail {
 		t.Errorf("Values did not match expected data")
 	}
-
 }
 
 func BaseicLDSHandler(t *testing.T, filename string, x1, x2, outxsize, outzsize int, cxmode string, expectedReturnCode int, expectedReturn []byte) {
-	os.Args = []string{"cmd", "-usecache=false", "-config=./tests/sdsTestConfig.json"}
+	e, _ := newTestServer(t)
 	locationName := "TestDir"
 	sdsurl := "/sds/lds/" + strconv.Itoa(x1) + "/" + strconv.Itoa(x2) + "/" + strconv.Itoa(outxsize) + "/" + strconv.Itoa(outzsize) + "/" + locationName + "/" + filename
 	sdsurl = sdsurl + "?cxmode=" + cxmode
 
 	t.Log("url:", sdsurl)
-	req, err := http.NewRequest("GET", sdsurl, nil)
-	//req, err := http.NewRequest("GET", sdsurl, url.Values{"mode": {"hdr"}})
-	if err != nil {
-		t.Fatal(err)
+	req := httptest.NewRequest(http.MethodGet, sdsurl, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != expectedReturnCode {
+		t.Errorf("handler returned wrong status code: got %v want %v", rec.Code, expectedReturnCode)
 	}
-
-	setupConfigLogCache()
-
-	rr := httptest.NewRecorder()
-	rdsServer := &routerServer{}
-	rdsServer.ServeHTTP(rr, req)
-
-	if rr.Code != expectedReturnCode {
-		t.Errorf("handler returned wrong status code: got %v want %v", rr.Code, expectedReturnCode)
+	if rec.Code != 200 {
+		return
 	}
-
-	if len(rr.Body.Bytes()) != len(expectedReturn) {
-		t.Errorf("Did not get correct length return. Got %v epected %v ", len(rr.Body.Bytes()), len(expectedReturn))
+	if len(rec.Body.Bytes()) != len(expectedReturn) {
+		t.Errorf("Did not get correct length return. Got %v expected %v", len(rec.Body.Bytes()), len(expectedReturn))
 	}
-
 	var testFail bool = false
-	for i := 0; i < len(rr.Body.Bytes()); i++ {
-		if rr.Body.Bytes()[i] != expectedReturn[i] {
+	for i := 0; i < len(rec.Body.Bytes()) && i < len(expectedReturn); i++ {
+		if rec.Body.Bytes()[i] != expectedReturn[i] {
 			testFail = true
-			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rr.Body.Bytes()[i], expectedReturn[i])
+			t.Errorf("Values Did not match expected for %v byte: got %v expected %v", i, rec.Body.Bytes()[i], expectedReturn[i])
 		}
 	}
-
 	if testFail {
 		t.Errorf("Values did not match expected data")
 	}
-
 }
 
 func makeWholeExpectedData(size int) []byte {
@@ -761,8 +701,8 @@ func TestMiddlePoints20LogColormapMax(t *testing.T) {
 
 func TestMiddlePoints20LogColormapMiddle(t *testing.T) {
 	expectedReturn := make([]byte, 4)
-	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 6.02. By setting the zmax to 0, "12.041199826559", the colormap should return the middle value which is 0,204,0.
-	expectedReturn[1] = 204
+	expectedReturn[0] = 0 //Input Data 2. 20*log10(2*2) = 6.02. By setting the zmax to "12.041199826559", the colormap should return the middle value which is 0,217,0.
+	expectedReturn[1] = 217
 	expectedReturn[2] = 0
 	expectedReturn[3] = 255 //Alpha is always 255
 	BaseicRDSHandlerColormap(t, "mydata_SB_60_60.tmp", 17, 20, 18, 21, 1, 1, "first", "L2", "Ramp Colormap", "0", "12.041199826559", 200, expectedReturn)

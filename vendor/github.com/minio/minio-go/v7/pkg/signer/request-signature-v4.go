@@ -38,29 +38,30 @@ const (
 
 // Different service types
 const (
-	ServiceTypeS3  = "s3"
-	ServiceTypeSTS = "sts"
+	ServiceTypeS3         = "s3"
+	ServiceTypeSTS        = "sts"
+	ServiceTypeS3Express  = "s3express"
+	ServiceTypeS3Outposts = "s3-outposts"
 )
 
-///
-/// Excerpts from @lsegal -
-/// https://github.com/aws/aws-sdk-js/issues/659#issuecomment-120477258.
-///
-///  User-Agent:
-///
-///      This is ignored from signing because signing this causes
-///      problems with generating pre-signed URLs (that are executed
-///      by other agents) or when customers pass requests through
-///      proxies, which may modify the user-agent.
-///
-///
-///  Authorization:
-///
-///      Is skipped for obvious reasons
-///
+// Excerpts from @lsegal -
+// https:/github.com/aws/aws-sdk-js/issues/659#issuecomment-120477258.
+//
+// * User-Agent
+// This is ignored from signing because signing this causes problems with generating pre-signed
+// URLs (that are executed by other agents) or when customers pass requests through proxies, which
+// may modify the user-agent.
+//
+// * Authorization
+// Is skipped for obvious reasons.
+//
+// * Accept-Encoding
+// Some S3 servers like Hitachi Content Platform do not honor this header for signature
+// calculation.
 var v4IgnoredHeaders = map[string]bool{
-	"Authorization": true,
-	"User-Agent":    true,
+	"Accept-Encoding": true,
+	"Authorization":   true,
+	"User-Agent":      true,
 }
 
 // getSigningKey hmac seed to calculate final signature.
@@ -118,7 +119,9 @@ func getCanonicalHeaders(req http.Request, ignoredHeaders map[string]bool) strin
 		headers = append(headers, strings.ToLower(k))
 		vals[strings.ToLower(k)] = vv
 	}
-	headers = append(headers, "host")
+	if !headerExists("host", headers) {
+		headers = append(headers, "host")
+	}
 	sort.Strings(headers)
 
 	var buf bytes.Buffer
@@ -127,10 +130,10 @@ func getCanonicalHeaders(req http.Request, ignoredHeaders map[string]bool) strin
 	for _, k := range headers {
 		buf.WriteString(k)
 		buf.WriteByte(':')
-		switch {
-		case k == "host":
+		switch k {
+		case "host":
 			buf.WriteString(getHostAddr(&req))
-			fallthrough
+			buf.WriteByte('\n')
 		default:
 			for idx, v := range vals[k] {
 				if idx > 0 {
@@ -144,6 +147,15 @@ func getCanonicalHeaders(req http.Request, ignoredHeaders map[string]bool) strin
 	return buf.String()
 }
 
+func headerExists(key string, headers []string) bool {
+	for _, k := range headers {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
 // getSignedHeaders generate all signed request headers.
 // i.e lexically sorted, semicolon-separated list of lowercase
 // request header names.
@@ -155,7 +167,9 @@ func getSignedHeaders(req http.Request, ignoredHeaders map[string]bool) string {
 		}
 		headers = append(headers, strings.ToLower(k))
 	}
-	headers = append(headers, "host")
+	if !headerExists("host", headers) {
+		headers = append(headers, "host")
+	}
 	sort.Strings(headers)
 	return strings.Join(headers, ";")
 }
@@ -163,14 +177,15 @@ func getSignedHeaders(req http.Request, ignoredHeaders map[string]bool) string {
 // getCanonicalRequest generate a canonical request of style.
 //
 // canonicalRequest =
-//  <HTTPMethod>\n
-//  <CanonicalURI>\n
-//  <CanonicalQueryString>\n
-//  <CanonicalHeaders>\n
-//  <SignedHeaders>\n
-//  <HashedPayload>
+//
+//	<HTTPMethod>\n
+//	<CanonicalURI>\n
+//	<CanonicalQueryString>\n
+//	<CanonicalHeaders>\n
+//	<SignedHeaders>\n
+//	<HashedPayload>
 func getCanonicalRequest(req http.Request, ignoredHeaders map[string]bool, hashedPayload string) string {
-	req.URL.RawQuery = strings.Replace(req.URL.Query().Encode(), "+", "%20", -1)
+	req.URL.RawQuery = strings.ReplaceAll(req.URL.Query().Encode(), "+", "%20")
 	canonicalRequest := strings.Join([]string{
 		req.Method,
 		s3utils.EncodePath(req.URL.Path),
@@ -186,7 +201,7 @@ func getCanonicalRequest(req http.Request, ignoredHeaders map[string]bool, hashe
 func getStringToSignV4(t time.Time, location, canonicalRequest, serviceType string) string {
 	stringToSign := signV4Algorithm + "\n" + t.Format(iso8601DateFormat) + "\n"
 	stringToSign = stringToSign + getScope(location, t, serviceType) + "\n"
-	stringToSign = stringToSign + hex.EncodeToString(sum256([]byte(canonicalRequest)))
+	stringToSign += hex.EncodeToString(sum256([]byte(canonicalRequest)))
 	return stringToSign
 }
 
@@ -216,7 +231,11 @@ func PreSignV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, loc
 	query.Set("X-Amz-Credential", credential)
 	// Set session token if available.
 	if sessionToken != "" {
-		query.Set("X-Amz-Security-Token", sessionToken)
+		if v := req.Header.Get("x-amz-s3session-token"); v != "" {
+			query.Set("X-Amz-S3session-Token", sessionToken)
+		} else {
+			query.Set("X-Amz-Security-Token", sessionToken)
+		}
 	}
 	req.URL.RawQuery = query.Encode()
 
@@ -238,6 +257,38 @@ func PreSignV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, loc
 	return &req
 }
 
+// PreSignV4Outposts presign the request for S3 on Outposts (service name s3-outposts).
+func PreSignV4Outposts(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string, expires int64) *http.Request {
+	// Presign is not needed for anonymous credentials.
+	if accessKeyID == "" || secretAccessKey == "" {
+		return &req
+	}
+
+	t := time.Now().UTC()
+	credential := GetCredential(accessKeyID, location, t, ServiceTypeS3Outposts)
+	signedHeaders := getSignedHeaders(req, v4IgnoredHeaders)
+	query := req.URL.Query()
+	query.Set("X-Amz-Algorithm", signV4Algorithm)
+	query.Set("X-Amz-Date", t.Format(iso8601DateFormat))
+	query.Set("X-Amz-Expires", strconv.FormatInt(expires, 10))
+	query.Set("X-Amz-SignedHeaders", signedHeaders)
+	query.Set("X-Amz-Credential", credential)
+	if sessionToken != "" {
+		if v := req.Header.Get("x-amz-s3session-token"); v != "" {
+			query.Set("X-Amz-S3session-Token", sessionToken)
+		} else {
+			query.Set("X-Amz-Security-Token", sessionToken)
+		}
+	}
+	req.URL.RawQuery = query.Encode()
+	canonicalRequest := getCanonicalRequest(req, v4IgnoredHeaders, getHashedPayload(req))
+	stringToSign := getStringToSignV4(t, location, canonicalRequest, ServiceTypeS3Outposts)
+	signingKey := getSigningKey(secretAccessKey, location, t, ServiceTypeS3Outposts)
+	signature := getSignature(signingKey, stringToSign)
+	req.URL.RawQuery += "&X-Amz-Signature=" + signature
+	return &req
+}
+
 // PostPresignSignatureV4 - presigned signature for PostPolicy
 // requests.
 func PostPresignSignatureV4(policyBase64 string, t time.Time, secretAccessKey, location string) string {
@@ -250,11 +301,11 @@ func PostPresignSignatureV4(policyBase64 string, t time.Time, secretAccessKey, l
 
 // SignV4STS - signature v4 for STS request.
 func SignV4STS(req http.Request, accessKeyID, secretAccessKey, location string) *http.Request {
-	return signV4(req, accessKeyID, secretAccessKey, "", location, ServiceTypeSTS)
+	return signV4(req, accessKeyID, secretAccessKey, "", location, ServiceTypeSTS, nil)
 }
 
 // Internal function called for different service types.
-func signV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, location, serviceType string) *http.Request {
+func signV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, location, serviceType string, trailer http.Header) *http.Request {
 	// Signature calculation is not needed for anonymous credentials.
 	if accessKeyID == "" || secretAccessKey == "" {
 		return &req
@@ -268,7 +319,20 @@ func signV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, locati
 
 	// Set session token if available.
 	if sessionToken != "" {
-		req.Header.Set("X-Amz-Security-Token", sessionToken)
+		// S3 Express token if not set then set sessionToken
+		// with older x-amz-security-token header.
+		if v := req.Header.Get("x-amz-s3session-token"); v == "" {
+			req.Header.Set("X-Amz-Security-Token", sessionToken)
+		}
+	}
+
+	if len(trailer) > 0 {
+		for k := range trailer {
+			req.Header.Add("X-Amz-Trailer", strings.ToLower(k))
+		}
+
+		setAwsChunkedContentEncoding(&req)
+		req.Header.Set("x-amz-decoded-content-length", strconv.FormatInt(req.ContentLength, 10))
 	}
 
 	hashedPayload := getHashedPayload(req)
@@ -308,11 +372,72 @@ func signV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, locati
 	auth := strings.Join(parts, ", ")
 	req.Header.Set("Authorization", auth)
 
+	if len(trailer) > 0 {
+		// Use custom chunked encoding.
+		req.Trailer = trailer
+		return StreamingUnsignedV4(&req, sessionToken, req.ContentLength, t)
+	}
 	return &req
+}
+
+// UnsignedTrailer will do chunked encoding with a custom trailer.
+func UnsignedTrailer(req http.Request, trailer http.Header) *http.Request {
+	if len(trailer) == 0 {
+		return &req
+	}
+	// Initial time.
+	t := time.Now().UTC()
+
+	// Set x-amz-date.
+	req.Header.Set("X-Amz-Date", t.Format(iso8601DateFormat))
+
+	for k := range trailer {
+		req.Header.Add("X-Amz-Trailer", strings.ToLower(k))
+	}
+
+	setAwsChunkedContentEncoding(&req)
+	req.Header.Set("x-amz-decoded-content-length", strconv.FormatInt(req.ContentLength, 10))
+
+	// Use custom chunked encoding.
+	req.Trailer = trailer
+	return StreamingUnsignedV4(&req, "", req.ContentLength, t)
 }
 
 // SignV4 sign the request before Do(), in accordance with
 // http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html.
 func SignV4(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string) *http.Request {
-	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3)
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3, nil)
+}
+
+// SignV4Express sign the request before Do(), in accordance with
+// http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html.
+func SignV4Express(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3Express, nil)
+}
+
+// SignV4TrailerExpress sign the request before Do(), in accordance with
+// http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
+func SignV4TrailerExpress(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string, trailer http.Header) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3Express, trailer)
+}
+
+// SignV4Trailer sign the request before Do(), in accordance with
+// http://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html
+func SignV4Trailer(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string, trailer http.Header) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3, trailer)
+}
+
+// SignV4Outposts sign the request for S3 on Outposts (service name s3-outposts).
+func SignV4Outposts(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3Outposts, nil)
+}
+
+// SignV4WithServiceType signs a request with AWS Signature Version 4 using a custom service type.
+func SignV4WithServiceType(req http.Request, accessKeyID, secretAccessKey, sessionToken, location, serviceType string) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, serviceType, nil)
+}
+
+// SignV4TrailerOutposts sign the request with trailer for S3 on Outposts (service name s3-outposts).
+func SignV4TrailerOutposts(req http.Request, accessKeyID, secretAccessKey, sessionToken, location string, trailer http.Header) *http.Request {
+	return signV4(req, accessKeyID, secretAccessKey, sessionToken, location, ServiceTypeS3Outposts, trailer)
 }

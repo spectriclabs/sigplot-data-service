@@ -1,0 +1,13 @@
+{
+  "location_details": [
+    {
+      "location_name": "minio",
+      "location_type": "minio",
+      "location": "minio:9000",
+      "minio_access_key": "minio",
+      "minio_bucket": "sdsdata",
+      "minio_secret_key": "miniostorage",
+      "minio_use_ssl": false
+    }
+  ]
+}

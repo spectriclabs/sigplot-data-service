@@ -7,6 +7,7 @@ package floats
 import (
 	"errors"
 	"math"
+	"slices"
 	"sort"
 
 	"gonum.org/v1/gonum/floats/scalar"
@@ -74,7 +75,7 @@ func AddScaledTo(dst, y []float64, alpha float64, s []float64) []float64 {
 }
 
 // argsort is a helper that implements sort.Interface, as used by
-// Argsort.
+// Argsort and ArgsortStable.
 type argsort struct {
 	s    []float64
 	inds []int
@@ -108,6 +109,24 @@ func Argsort(dst []float64, inds []int) {
 
 	a := argsort{s: dst, inds: inds}
 	sort.Sort(a)
+}
+
+// ArgsortStable sorts the elements of dst while tracking their original order and
+// keeping the original order of equal elements. At the conclusion of ArgsortStable,
+// dst will contain the original elements of dst but sorted in increasing order,
+// and inds will contain the original position of the elements in the slice such
+// that dst[i] = origDst[inds[i]].
+// It panics if the argument lengths do not match.
+func ArgsortStable(dst []float64, inds []int) {
+	if len(dst) != len(inds) {
+		panic(badDstLength)
+	}
+	for i := range dst {
+		inds[i] = i
+	}
+
+	a := argsort{s: dst, inds: inds}
+	sort.Stable(a)
 }
 
 // Count applies the function f to every element of s and returns the number
@@ -343,7 +362,7 @@ func HasNaN(s []float64) bool {
 // will return all zeros if l or u is zero.
 // Also returns the mutated slice dst, so that it can be used in range, like:
 //
-//     for i, x := range LogSpan(dst, l, u) { ... }
+//	for i, x := range LogSpan(dst, l, u) { ... }
 func LogSpan(dst []float64, l, u float64) []float64 {
 	Span(dst, math.Log(l), math.Log(u))
 	for i := range dst {
@@ -615,10 +634,10 @@ func Prod(s []float64) float64 {
 }
 
 // Reverse reverses the order of elements in the slice.
+//
+// Deprecated: This function simply calls [slices.Reverse].
 func Reverse(s []float64) {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
-	}
+	slices.Reverse(s)
 }
 
 // Same returns true when the input slices have the same length and all
@@ -663,7 +682,7 @@ func ScaleTo(dst []float64, c float64, s []float64) []float64 {
 // Span also returns the mutated slice dst, so that it can be used in range expressions,
 // like:
 //
-//     for i, x := range Span(dst, l, u) { ... }
+//	for i, x := range Span(dst, l, u) { ... }
 func Span(dst []float64, l, u float64) []float64 {
 	n := len(dst)
 	if n < 2 {
@@ -747,8 +766,8 @@ func Sum(s []float64) float64 {
 }
 
 // Within returns the first index i where s[i] <= v < s[i+1]. Within panics if:
-//  - len(s) < 2
-//  - s is not sorted
+//   - len(s) < 2
+//   - s is not sorted
 func Within(s []float64, v float64) int {
 	if len(s) < 2 {
 		panic(shortSpan)

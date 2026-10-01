@@ -71,29 +71,59 @@ The url for RDS Tile mode is `<host:port>/sds/rdstile/<tileXsize>/<tileYsize>/<d
 RDS Tiles mode works by thinning the file based on the decimation values provided. If an input file was 3000 by 3000 and a decimation mode for x and y was 3 (deciamte by 4) then the resulting data would be a 750 by 750 file. The those points would be broken up into section based on the tile size. For a tile X size of 100 and a tileYsize of 200, then you would get 8 tiles in each row, the first 7 would have 100 points and the last 50 points. Then 4 tiles in each column with 200 points for the first three, then 150 for the last one. The valid tiles numbesr for x would be 0-7 and y would be 0-3. Tile 7,3 would be the smallest at 50 by 150. 
 
 ## Unit Tests
-A series of unit tests are available in `sigplot_data_service_test.go`. To run just type `go test` from the source directory. The unit tests use a few data files are are located in th `/tests/` directory. 
+A series of unit tests are available in the Go packages. Run them with:
+
+```
+make test
+```
+
+The unit tests use sample BLUE files located in `tests/data/`.
 
 ## Building
 
-Uses go1.13
+Uses Go 1.26.
+
+Common Make targets:
+
+```
+make ui        # build the Vite/React UI
+make sds       # build the API server without embedded UI
+make sds-ui    # build the API server with the UI embedded at /sigplot/ui/
+make docker    # build the sds:0.7 Docker image
+make test      # run Go tests
+make test-race # run Go tests with the race detector
+make test-fuzz # run each fuzz target
+make clean
+```
 
 ## UI Development Mode
 
 ```
-cd ui
-nvm use # assumes you have run nvm install at least once
-yarn install
-SDS_URL="http://localhost:5055/sds" ROOT_URL="/ui/" ./node_modules/ember-cli/bin/ember serve
+cd ui/webapp
+npm ci
+npm run dev
 ```
 
-Now you can visit http://localhost:4200/ui/demo.
+The Vite dev server serves the UI at `http://localhost:5173/sigplot/ui/`. Its `vite.config.js` proxies absolute `/sds/...` API calls to `http://localhost:5055`, so run SDS separately with `make sds-ui` or `make sds` and then `./sigplot_data_service`.
 
 ## Docker
 
-The Docker version currently *MUST* be run behind an NGINX proxy rooted at /sigplot/
-
 ```
-make docker
+# Build and run with MinIO
+docker compose up
 
-docker run -it --rm -p 5055:5055 sds:0.1
+# Or build and run the image alone with local files mounted at /data
+docker build -t sds:0.7 .
+docker run --rm -p 5055:5055 -v "$PWD/tests/data:/data:ro" sds:0.7
 ```
+
+`docker compose up` starts:
+- **SDS** on port 5055
+- **MinIO** on port 9000 (API) and 9001 (console)
+- Automatic bucket creation (`sdsdata`)
+
+The standalone image includes a safe default `sds_config.json` that exposes `/data` as the `data` location and writes cache files under `/opt/sds/sdscache` as a non-root user. Use `-v /path/to/blue/files:/data:ro` to serve your own local files. The embedded UI is available at `http://localhost:5055/sigplot/ui/`; the file listing endpoint is `http://localhost:5055/sds/fs`.
+
+Upload files to MinIO via the console at http://localhost:9001 (user: `minio`, password: `miniostorage`), then access them through SDS at `http://localhost:5055/sds/fs/minio/`.
+
+**Note:** SDS can also be deployed behind an NGINX reverse proxy. The sample `deploy/nginx.conf` proxies the embedded UI at `/sigplot/ui/` and the API at `/sds/`.

@@ -1,53 +1,76 @@
+// SPDX-License-Identifier: MIT
+// SPDX-FileCopyrightText: © 2015 LabStack LLC and Echo contributors
+
 package middleware
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/bytes"
 )
 
-type (
-	// StaticConfig defines the config for Static middleware.
-	StaticConfig struct {
-		// Skipper defines a function to skip middleware.
-		Skipper Skipper
+// StaticConfig defines the config for Static middleware.
+type StaticConfig struct {
+	// Skipper defines a function to skip middleware.
+	Skipper Skipper
 
-		// Root directory from where the static content is served.
-		// Required.
-		Root string `yaml:"root"`
+	// Root directory from where the static content is served.
+	// Required.
+	Root string `yaml:"root"`
 
-		// Index file for serving a directory.
-		// Optional. Default value "index.html".
-		Index string `yaml:"index"`
+	// Index file for serving a directory.
+	// Optional. Default value "index.html".
+	Index string `yaml:"index"`
 
-		// Enable HTML5 mode by forwarding all not-found requests to root so that
-		// SPA (single-page application) can handle the routing.
-		// Optional. Default value false.
-		HTML5 bool `yaml:"html5"`
+	// Enable HTML5 mode by forwarding all not-found requests to root so that
+	// SPA (single-page application) can handle the routing.
+	// Optional. Default value false.
+	HTML5 bool `yaml:"html5"`
 
-		// Enable directory browsing.
-		// Optional. Default value false.
-		Browse bool `yaml:"browse"`
+	// Enable directory browsing.
+	// Optional. Default value false.
+	Browse bool `yaml:"browse"`
 
-		// Enable ignoring of the base of the URL path.
-		// Example: when assigning a static middleware to a non root path group,
-		// the filesystem path is not doubled
-		// Optional. Default value false.
-		IgnoreBase bool `yaml:"ignoreBase"`
+	// Enable ignoring of the base of the URL path.
+	// Example: when assigning a static middleware to a non root path group,
+	// the filesystem path is not doubled
+	// Optional. Default value false.
+	IgnoreBase bool `yaml:"ignoreBase"`
 
-		// Filesystem provides access to the static content.
-		// Optional. Defaults to http.Dir(config.Root)
-		Filesystem http.FileSystem `yaml:"-"`
-	}
-)
+	// Filesystem provides access to the static content.
+	// Optional. Defaults to http.Dir(config.Root)
+	Filesystem http.FileSystem `yaml:"-"`
+
+	// EnablePathUnescaping enables unescaping of the request path (or of the wildcard param `*` when the middleware is
+	// used on a wildcard route) before the file is looked up.
+	// Default false (safe): the path is used in the same form as the router matched it, so encoded characters such as
+	// encoded slashes (%2f) are NOT decoded, preventing ACL bypass where /admin%2fprivate.txt bypasses a /admin/* route
+	// guard by not matching that route but being decoded to admin/private.txt. As a consequence, file names that the
+	// client sends with non-default escaping (e.g. `%2C`, `%40` or lowercase hex like `%c3%a9`) are not found.
+	// Set to true only when serving files whose names need such unescaping and you are not relying on route-based
+	// ACL guards to restrict access. Paths with ".", ".." or empty segments are never served, also after unescaping.
+	//
+	// Enabling echo.RouterConfig.UseEscapedPathForMatching makes this field irrelevant and can lead to security issues when
+	// using different Routes to exclude some of the files from being served.
+	// e.g. if you serve files from directory as such and use different route to exclude some of the files from being served.
+	// 0. given folder structure:
+	//   public/
+	//   public/index.html
+	//   public/admin/private.txt
+	// 1. share `public/` folder contents from the server root with `e.Static("/", "public")`
+	// 2. naively assume that everything under /admin folder is now forbidden
+	//       e.GET("/admin/*", func(c *Context) error { return echo.ErrForbidden })
+	// Then request to `/assets/../admin%2fprivate.txt` will be served as router does not match it to guarded route.
+	EnablePathUnescaping bool `yaml:"enablePathUnescaping"`
+}
 
 const html = `
 <!DOCTYPE html>
@@ -121,16 +144,18 @@ const html = `
 </html>
 `
 
-var (
-	// DefaultStaticConfig is the default Static middleware config.
-	DefaultStaticConfig = StaticConfig{
-		Skipper: DefaultSkipper,
-		Index:   "index.html",
-	}
-)
+// DefaultStaticConfig is the default Static middleware config.
+var DefaultStaticConfig = StaticConfig{
+	Skipper: DefaultSkipper,
+	Index:   "index.html",
+}
 
 // Static returns a Static middleware to serves static content from the provided
 // root directory.
+//
+// Security: when registered with Echo#Use, the middleware runs before route and group middleware, so guards on routes
+// or groups (for example authentication on an `/admin` group) do not protect the files it serves. Keep files that
+// need protection outside the root directory, or serve them with Echo#Static / Group#Static behind the guard.
 func Static(root string) echo.MiddlewareFunc {
 	c := DefaultStaticConfig
 	c.Root = root
@@ -156,9 +181,9 @@ func StaticWithConfig(config StaticConfig) echo.MiddlewareFunc {
 	}
 
 	// Index template
-	t, err := template.New("index").Parse(html)
-	if err != nil {
-		panic(fmt.Sprintf("echo: %v", err))
+	t, tErr := template.New("index").Parse(html)
+	if tErr != nil {
+		panic(fmt.Errorf("echo: %w", tErr))
 	}
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -167,15 +192,35 @@ func StaticWithConfig(config StaticConfig) echo.MiddlewareFunc {
 				return next(c)
 			}
 
-			p := c.Request().URL.Path
+			req := c.Request()
+			// Resolve the file from the same form of the path that the router matched: the escaped path when it
+			// differs from the default encoding. Using the decoded path would let `/admin%2Fsecret.txt` reach a file
+			// under a guarded `/admin/*` route (GHSA-375p-5qhx-8wq4).
+			p := req.URL.Path
+			if req.URL.RawPath != "" {
+				p = req.URL.RawPath
+			}
+			// A path with a ".", ".." or empty segment is resolved by path.Clean() to a different file than the path
+			// the router matched, so it is not served as a file (GHSA-3pmx-cf9f-34xr).
+			unclean := hasUncleanPath(req)
 			if strings.HasSuffix(c.Path(), "*") { // When serving from a group, e.g. `/static*`.
 				p = c.Param("*")
+				unclean = unclean || hasDotOrEmptySegment(p)
 			}
-			p, err = url.PathUnescape(p)
-			if err != nil {
-				return
+			if !unclean && config.EnablePathUnescaping {
+				p, err = url.PathUnescape(p)
+				if err != nil {
+					return
+				}
+				unclean = hasDotOrEmptySegment(p) // unescaping can create new dot segments, e.g. `%2e%2e`
 			}
-			name := filepath.Join(config.Root, filepath.Clean("/"+p)) // "/"+ for security
+			// Security: We use path.Clean() (not filepath.Clean()) because:
+			// 1. HTTP URLs always use forward slashes, regardless of server OS
+			// 2. path.Clean() provides platform-independent behavior for URL paths
+			// 3. The "/" prefix forces absolute path interpretation, removing ".." components
+			// 4. Backslashes are treated as literal characters (not path separators), preventing traversal
+			// See static_windows.go for Go 1.20+ filepath.Clean compatibility notes
+			name := path.Join(config.Root, path.Clean("/"+p)) // "/"+ for security
 
 			if config.IgnoreBase {
 				routePath := path.Base(strings.TrimRight(c.Path(), "/*"))
@@ -186,22 +231,29 @@ func StaticWithConfig(config StaticConfig) echo.MiddlewareFunc {
 				}
 			}
 
-			file, err := openFile(config.Filesystem, name)
+			var file http.File
+			if unclean {
+				err = os.ErrNotExist // handle like a missing file, so HTML5 mode can still serve the index
+			} else {
+				file, err = config.Filesystem.Open(name)
+			}
 			if err != nil {
-				if !os.IsNotExist(err) {
+				if !isIgnorableOpenFileError(err) {
 					return err
 				}
 
+				// file with that path did not exist, so we continue down in middleware/handler chain, hoping that we end up in
+				// handler that is meant to handle this request
 				if err = next(c); err == nil {
 					return err
 				}
 
-				he, ok := err.(*echo.HTTPError)
-				if !(ok && config.HTML5 && he.Code == http.StatusNotFound) {
+				var he *echo.HTTPError
+				if !(errors.As(err, &he) && config.HTML5 && he.Code == http.StatusNotFound) {
 					return err
 				}
 
-				file, err = openFile(config.Filesystem, filepath.Join(config.Root, config.Index))
+				file, err = config.Filesystem.Open(path.Join(config.Root, config.Index))
 				if err != nil {
 					return err
 				}
@@ -215,15 +267,13 @@ func StaticWithConfig(config StaticConfig) echo.MiddlewareFunc {
 			}
 
 			if info.IsDir() {
-				index, err := openFile(config.Filesystem, filepath.Join(name, config.Index))
+				index, err := config.Filesystem.Open(path.Join(name, config.Index))
 				if err != nil {
 					if config.Browse {
 						return listDir(t, name, file, c.Response())
 					}
 
-					if os.IsNotExist(err) {
-						return next(c)
-					}
+					return next(c)
 				}
 
 				defer index.Close()
@@ -239,11 +289,6 @@ func StaticWithConfig(config StaticConfig) echo.MiddlewareFunc {
 			return serveFile(c, file, info)
 		}
 	}
-}
-
-func openFile(fs http.FileSystem, name string) (http.File, error) {
-	pathWithSlashes := filepath.ToSlash(name)
-	return fs.Open(pathWithSlashes)
 }
 
 func serveFile(c echo.Context, file http.File, info os.FileInfo) error {
@@ -273,4 +318,31 @@ func listDir(t *template.Template, name string, dir http.File, res *echo.Respons
 		}{f.Name(), f.IsDir(), bytes.Format(f.Size())})
 	}
 	return t.Execute(res, data)
+}
+
+// hasDotOrEmptySegment reports whether URL path p has a ".", ".." or empty segment. A single leading and a single
+// trailing slash are allowed.
+// Keep in sync with the copy in echo_fs.go.
+func hasDotOrEmptySegment(p string) bool {
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+	if p == "" {
+		return false
+	}
+	for segment := range strings.SplitSeq(p, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// hasUncleanPath reports whether the request path, in the form the router matches by default (the escaped path when it
+// differs from the default encoding), has a ".", ".." or empty segment. Encoded dots such as `%2E%2E` are not
+// segments here; they only act as `..` when path unescaping for static files is enabled.
+func hasUncleanPath(req *http.Request) bool {
+	if req.URL.RawPath != "" {
+		return hasDotOrEmptySegment(req.URL.RawPath)
+	}
+	return hasDotOrEmptySegment(req.URL.Path)
 }

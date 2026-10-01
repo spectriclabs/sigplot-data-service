@@ -28,7 +28,7 @@ import (
 
 // FGetObject - download contents of an object to a local file.
 // The options can be used to specify the GET request further.
-func (c Client) FGetObject(ctx context.Context, bucketName, objectName, filePath string, opts GetObjectOptions) error {
+func (c *Client) FGetObject(ctx context.Context, bucketName, objectName, filePath string, opts GetObjectOptions) error {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return err
@@ -57,7 +57,7 @@ func (c Client) FGetObject(ctx context.Context, bucketName, objectName, filePath
 	objectDir, _ := filepath.Split(filePath)
 	if objectDir != "" {
 		// Create any missing top level directories.
-		if err := os.MkdirAll(objectDir, 0700); err != nil {
+		if err := os.MkdirAll(objectDir, 0o700); err != nil {
 			return err
 		}
 	}
@@ -69,10 +69,10 @@ func (c Client) FGetObject(ctx context.Context, bucketName, objectName, filePath
 	}
 
 	// Write to a temporary file "fileName.part.minio" before saving.
-	filePartPath := filePath + objectStat.ETag + ".part.minio"
+	filePartPath := filepath.Join(filepath.Dir(filePath), sum256Hex([]byte(filepath.Base(filePath)+objectStat.ETag))+".part.minio")
 
 	// If exists, open in append mode. If not create it as a part file.
-	filePart, err := os.OpenFile(filePartPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	filePart, err := os.OpenFile(filePartPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
@@ -98,17 +98,39 @@ func (c Client) FGetObject(ctx context.Context, bucketName, objectName, filePath
 	// appropriate range offsets to read from.
 	if st.Size() > 0 {
 		opts.SetRange(st.Size(), 0)
+		if opts.Checksum && objectStat.ChecksumMode == ChecksumFullObjectMode.String() {
+			if hasherReader := c.newChecksumVerifyingReader(objectStat); hasherReader != nil {
+				// Read existing file data into hash.
+				if _, err = io.CopyN(hasherReader.Hash, filePart, st.Size()); err != nil {
+					_ = hasherReader.Close()
+					return err
+				}
+				opts.checkSumReader = hasherReader
+			}
+		}
 	}
 
 	// Seek to current position for incoming reader.
 	objectReader, objectStat, _, err := c.getObject(ctx, bucketName, objectName, opts)
 	if err != nil {
+		if opts.checkSumReader != nil {
+			_ = opts.checkSumReader.Close()
+		}
 		return err
 	}
+
+	defer objectReader.Close()
 
 	// Write to the part file.
 	if _, err = io.CopyN(filePart, objectReader, objectStat.Size); err != nil {
 		return err
+	}
+
+	// Verify the checksum of the downloaded object before committing the file.
+	if cr, ok := objectReader.(*checksumVerifyingReader); ok {
+		if err = cr.VerifyChecksum(); err != nil {
+			return err
+		}
 	}
 
 	// Close the file before rename, this is specifically needed for Windows users.

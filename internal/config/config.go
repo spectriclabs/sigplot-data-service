@@ -21,4 +21,5 @@ type Location struct {
 	Location       string `json:"location,omitempty"`
 	MinioAccessKey string `json:"minio_access_key,omitempty"`
 	MinioSecretKey string `json:"minio_secret_key,omitempty"`
+	MinioUseSSL    bool   `json:"minio_use_ssl,omitempty"`
 }

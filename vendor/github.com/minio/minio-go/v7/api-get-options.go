@@ -20,23 +20,46 @@ package minio
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"time"
+	"unsafe"
 
 	"github.com/minio/minio-go/v7/pkg/encrypt"
 )
 
-//AdvancedGetOptions for internal use by MinIO server - not intended for client use.
+// AdvancedGetOptions for internal use by MinIO server - not intended for client use.
 type AdvancedGetOptions struct {
-	ReplicationDeleteMarker bool
-	ReplicationProxyRequest string
+	ReplicationDeleteMarker           bool
+	IsReplicationReadyForDeleteMarker bool
+	ReplicationProxyRequest           string
 }
 
 // GetObjectOptions are used to specify additional headers or options
 // during GET requests.
 type GetObjectOptions struct {
 	headers              map[string]string
+	reqParams            url.Values
 	ServerSideEncryption encrypt.ServerSide
 	VersionID            string
+	PartNumber           int
+
+	// For multipart objects this is a checksum of part checksums.
+	// https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html
+	// When the response advertises a full-object checksum, un-ranged
+	// downloads are verified against it: reads through *Object fail with a
+	// checksum mismatch error at EOF, and FGetObject fails before renaming
+	// the file into place. Reads that stop before EOF are not verified.
+	Checksum bool
+	// If not nil, continue checksum hash verification on the existing data.
+	checkSumReader *checksumVerifyingReader
+
+	// RDMABuffer, when non-nil and Options.EnableRDMA=true, downloads directly
+	// into a contiguous buffer via libminiocpp.so. The returned *Object's
+	// Read() returns EOF immediately; bytes-transferred is in Stat().Size.
+	RDMABuffer     unsafe.Pointer
+	RDMABufferSize int
+
 	// To be not used by external applications
 	Internal AdvancedGetOptions
 }
@@ -59,6 +82,9 @@ func (o GetObjectOptions) Header() http.Header {
 	if o.Internal.ReplicationProxyRequest != "" {
 		headers.Set(minIOBucketReplicationProxyRequest, o.Internal.ReplicationProxyRequest)
 	}
+	if o.Checksum {
+		headers.Set("x-amz-checksum-mode", "ENABLED")
+	}
 	return headers
 }
 
@@ -70,6 +96,34 @@ func (o *GetObjectOptions) Set(key, value string) {
 		o.headers = make(map[string]string)
 	}
 	o.headers[http.CanonicalHeaderKey(key)] = value
+}
+
+// SetReqParam - set request query string parameter
+// supported key: see supportedQueryValues and allowedCustomQueryPrefix.
+// If an unsupported key is passed in, it will be ignored and nothing will be done.
+func (o *GetObjectOptions) SetReqParam(key, value string) {
+	if !isCustomQueryValue(key) && !isStandardQueryValue(key) {
+		// do nothing
+		return
+	}
+	if o.reqParams == nil {
+		o.reqParams = make(url.Values)
+	}
+	o.reqParams.Set(key, value)
+}
+
+// AddReqParam - add request query string parameter
+// supported key: see supportedQueryValues and allowedCustomQueryPrefix.
+// If an unsupported key is passed in, it will be ignored and nothing will be done.
+func (o *GetObjectOptions) AddReqParam(key, value string) {
+	if !isCustomQueryValue(key) && !isStandardQueryValue(key) {
+		// do nothing
+		return
+	}
+	if o.reqParams == nil {
+		o.reqParams = make(url.Values)
+	}
+	o.reqParams.Add(key, value)
 }
 
 // SetMatchETag - set match etag.
@@ -137,4 +191,25 @@ func (o *GetObjectOptions) SetRange(start, end int64) error {
 				start, end))
 	}
 	return nil
+}
+
+// toQueryValues - Convert the versionId, partNumber, and reqParams in Options to query string parameters.
+func (o *GetObjectOptions) toQueryValues() url.Values {
+	urlValues := make(url.Values)
+	if o.VersionID != "" {
+		urlValues.Set("versionId", o.VersionID)
+	}
+	if o.PartNumber > 0 {
+		urlValues.Set("partNumber", strconv.Itoa(o.PartNumber))
+	}
+
+	if o.reqParams != nil {
+		for key, values := range o.reqParams {
+			for _, value := range values {
+				urlValues.Add(key, value)
+			}
+		}
+	}
+
+	return urlValues
 }

@@ -1,5 +1,10 @@
-sigplot_data_service
-dist/
 .git/
-ui/webapp/node_modules/
+.github/
+deploy/
+scripts/
+tests/
+sigplot_data_service
 sdscache/
+ui/webapp/dist/
+ui/webapp/node_modules/
+*.pyc
