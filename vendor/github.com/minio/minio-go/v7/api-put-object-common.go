@@ -26,10 +26,12 @@ import (
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
+const nullVersionID = "null"
+
 // Verify if reader is *minio.Object
 func isObject(reader io.Reader) (ok bool) {
 	_, ok = reader.(*Object)
-	return
+	return ok
 }
 
 // Verify if reader is a generic ReaderAt
@@ -54,7 +56,7 @@ func isReadAt(reader io.Reader) (ok bool) {
 	} else {
 		_, ok = reader.(io.ReaderAt)
 	}
-	return
+	return ok
 }
 
 // OptimalPartInfo - calculate the optimal part info for a given
@@ -63,12 +65,13 @@ func isReadAt(reader io.Reader) (ok bool) {
 // NOTE: Assumption here is that for any object to be uploaded to any S3 compatible
 // object storage it will have the following parameters as constants.
 //
-//  maxPartsCount - 10000
-//  minPartSize - 16MiB
-//  maxMultipartPutObjectSize - 5TiB
-//
-func OptimalPartInfo(objectSize int64, configuredPartSize uint64) (totalPartsCount int, partSize int64, lastPartSize int64, err error) {
-	// object size is '-1' set it to 5TiB.
+//	maxPartsCount - 10000
+//	minPartSize - 16MiB
+//	maxObjectSize - ~48.83TiB (maxPartSize * maxPartsCount)
+func OptimalPartInfo(objectSize int64, configuredPartSize uint64) (totalPartsCount int, partSize, lastPartSize int64, err error) {
+	// When object size is unknown (-1), default to 5TiB to limit memory usage.
+	// This results in ~537MiB part sizes. For larger objects (up to ~48.83TiB),
+	// callers should set configuredPartSize explicitly to control memory usage.
 	var unknownSize bool
 	if objectSize == -1 {
 		unknownSize = true
@@ -76,33 +79,33 @@ func OptimalPartInfo(objectSize int64, configuredPartSize uint64) (totalPartsCou
 	}
 
 	// object size is larger than supported maximum.
-	if objectSize > maxMultipartPutObjectSize {
-		err = errEntityTooLarge(objectSize, maxMultipartPutObjectSize, "", "")
-		return
+	if objectSize > maxObjectSize {
+		err = errEntityTooLarge(objectSize, maxObjectSize, "", "")
+		return totalPartsCount, partSize, lastPartSize, err
 	}
 
 	var partSizeFlt float64
 	if configuredPartSize > 0 {
 		if int64(configuredPartSize) > objectSize {
 			err = errEntityTooLarge(int64(configuredPartSize), objectSize, "", "")
-			return
+			return totalPartsCount, partSize, lastPartSize, err
 		}
 
 		if !unknownSize {
 			if objectSize > (int64(configuredPartSize) * maxPartsCount) {
 				err = errInvalidArgument("Part size * max_parts(10000) is lesser than input objectSize.")
-				return
+				return totalPartsCount, partSize, lastPartSize, err
 			}
 		}
 
 		if configuredPartSize < absMinPartSize {
 			err = errInvalidArgument("Input part size is smaller than allowed minimum of 5MiB.")
-			return
+			return totalPartsCount, partSize, lastPartSize, err
 		}
 
 		if configuredPartSize > maxPartSize {
 			err = errInvalidArgument("Input part size is bigger than allowed maximum of 5GiB.")
-			return
+			return totalPartsCount, partSize, lastPartSize, err
 		}
 
 		partSizeFlt = float64(configuredPartSize)
@@ -130,7 +133,7 @@ func OptimalPartInfo(objectSize int64, configuredPartSize uint64) (totalPartsCou
 
 // getUploadID - fetch upload id if already present for an object name
 // or initiate a new request to fetch a new upload id.
-func (c Client) newUploadID(ctx context.Context, bucketName, objectName string, opts PutObjectOptions) (uploadID string, err error) {
+func (c *Client) newUploadID(ctx context.Context, bucketName, objectName string, opts PutObjectOptions) (uploadID string, err error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return "", err

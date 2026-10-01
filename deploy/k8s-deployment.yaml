@@ -1,0 +1,84 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: sigplot-data-service
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: sigplot-data-service
+  
+  template:
+    metadata:
+      labels:
+        app: sigplot-data-service
+    spec:
+      containers:
+      - name: sigplot-data-service
+        image: sds:0.7
+        args:
+        - --config=/opt/sds/sds_config.json
+        - --cache-location=/opt/sds/sdscache
+        ports:
+        - name: http
+          containerPort: 5055
+        livenessProbe:
+          httpGet:
+            path: /sds/fs
+            port: http
+        readinessProbe:
+          httpGet:
+            path: /sds/fs
+            port: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+        volumeMounts:
+        - name: sds-secret
+          mountPath: /opt/sds/sds_config.json
+          subPath: sds_config.json
+          readOnly: true
+        - name: sds-cache
+          mountPath: /opt/sds/sdscache
+      volumes:
+      - name: sds-secret
+        secret:
+          defaultMode: 420
+          secretName: sds-secret
+      - name: sds-cache
+        emptyDir: {}
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: sigplot-data-service
+spec:
+  ports:
+  - port: 5055
+    targetPort: http
+    protocol: TCP
+  selector:
+    app: sigplot-data-service
+
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: sigplot-data-service
+spec:
+  rules:
+  - host: sds.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sigplot-data-service
+            port:
+              number: 5055

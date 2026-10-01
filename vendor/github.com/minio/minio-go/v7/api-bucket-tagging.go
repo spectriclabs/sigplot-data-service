@@ -22,7 +22,6 @@ import (
 	"encoding/xml"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 
@@ -30,9 +29,15 @@ import (
 	"github.com/minio/minio-go/v7/pkg/tags"
 )
 
-// GetBucketTagging fetch tagging configuration for a bucket with a
-// context to control cancellations and timeouts.
-func (c Client) GetBucketTagging(ctx context.Context, bucketName string) (*tags.Tags, error) {
+// GetBucketTagging fetches the tagging configuration for a bucket.
+// It uses the provided context to control cancellations and timeouts.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns the bucket's tags or an error if the operation fails.
+func (c *Client) GetBucketTagging(ctx context.Context, bucketName string) (*tags.Tags, error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return nil, err
@@ -58,13 +63,20 @@ func (c Client) GetBucketTagging(ctx context.Context, bucketName string) (*tags.
 		return nil, httpRespToErrorResponse(resp, bucketName, "")
 	}
 
-	defer io.Copy(ioutil.Discard, resp.Body)
+	defer io.Copy(io.Discard, resp.Body)
 	return tags.ParseBucketXML(resp.Body)
 }
 
-// SetBucketTagging sets tagging configuration for a bucket
-// with a context to control cancellations and timeouts.
-func (c Client) SetBucketTagging(ctx context.Context, bucketName string, tags *tags.Tags) error {
+// SetBucketTagging sets the tagging configuration for a bucket.
+// It uses the provided context to control cancellations and timeouts.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//   - tags: Tag set to apply to the bucket
+//
+// Returns an error if the operation fails or if tags is nil.
+func (c *Client) SetBucketTagging(ctx context.Context, bucketName string, tags *tags.Tags) error {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return err
@@ -105,9 +117,15 @@ func (c Client) SetBucketTagging(ctx context.Context, bucketName string, tags *t
 	return nil
 }
 
-// RemoveBucketTagging removes tagging configuration for a
-// bucket with a context to control cancellations and timeouts.
-func (c Client) RemoveBucketTagging(ctx context.Context, bucketName string) error {
+// RemoveBucketTagging removes the tagging configuration from a bucket.
+// It uses the provided context to control cancellations and timeouts.
+//
+// Parameters:
+//   - ctx: Context for request cancellation and timeout
+//   - bucketName: Name of the bucket
+//
+// Returns an error if the operation fails.
+func (c *Client) RemoveBucketTagging(ctx context.Context, bucketName string) error {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return err

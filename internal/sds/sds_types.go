@@ -2,11 +2,11 @@ package sds
 
 import (
 	"encoding/binary"
+	"fmt"
 	"gonum.org/v1/gonum/floats"
 	"io"
 	"log"
 	"math"
-	"net/http"
 	"sync"
 	"time"
 
@@ -37,19 +37,22 @@ type RdsRequest struct {
 	DecX           int
 	DecY           int
 	Zset           bool
-	Subsize        int `query:"subsize,omitempty"`
+	Subsize        int `query:"subsize"`
 	SubsizeSet     bool
 	Transform      string `query:"transform"`
-	ColorMap       string `query:"colormap,omitempty"`
+	ColorMap       string `query:"colormap"`
 	Reader         io.ReadSeeker
-	Cxmode         string `query:"cxmode,omitempty"`
+	ReaderMutex    *sync.Mutex
+	Cxmode         string `query:"cxmode"`
 	CxmodeSet      bool
-	OutputFmt      string  `query:"outfmt,omitempty"`
+	OutputFmt      string  `query:"outfmt"`
 	Outxsize       int     `json:"outxsize" param:"outxsize"`
 	Outysize       int     `json:"outysize" param:"outysize"`
 	Outzsize       int     `json:"outzsize" param:"outzsize"`
-	Zmin           float64 `json:"zmin" query:"zmin,omitempty"`
-	Zmax           float64 `json:"zmax" query:"zmax,omitempty"`
+	Zmin           float64 `json:"zmin" query:"zmin"`
+	Zmax           float64 `json:"zmax" query:"zmax"`
+	ZminSet        bool
+	ZmaxSet        bool
 	Filexstart     float64 `json:"filexstart"`
 	Filexdelta     float64 `json:"filexdelta"`
 	Fileystart     float64 `json:"fileystart"`
@@ -68,6 +71,28 @@ func (request *RdsRequest) ComputeYSize() {
 	request.FileYSize = int(request.FileDataSize/bluefile.BytesPerAtomMap[string(request.FileFormat[1])]) / (request.FileXSize)
 	if string(request.FileFormat[0]) == "C" {
 		request.FileYSize = request.FileYSize / 2
+	}
+}
+
+// ApplyBindDefaults sets boolean flags and defaults after Echo Bind
+func (request *RdsRequest) ApplyBindDefaults() {
+	request.SubsizeSet = request.Subsize > 0
+	if !request.SubsizeSet {
+		request.Subsize = 1
+	}
+	request.CxmodeSet = request.Cxmode != ""
+	if !request.CxmodeSet {
+		request.Cxmode = "Re"
+	}
+	request.Zset = request.ZminSet && request.ZmaxSet
+	if request.Transform == "" {
+		request.Transform = "first"
+	}
+	if request.ColorMap == "" {
+		request.ColorMap = "RampColormap"
+	}
+	if request.OutputFmt == "" {
+		request.OutputFmt = "RGBA"
 	}
 }
 
@@ -105,54 +130,44 @@ func (request *RdsRequest) ProcessBlueFileHeader() {
 	request.FileDataSize = bluefileheader.DataSize
 }
 
-func (request *RdsRequest) GetQueryParams(r *http.Request) {
-	var ok bool
-	// Get URL Query Params
-	request.Transform, ok = GetURLQueryParamString(r, "transform")
-	if !ok {
-		request.Transform = "first"
-	}
-	request.SubsizeSet = true
-	request.Subsize, ok = GetURLQueryParamInt(r, "subsize")
-	if !ok {
-		request.Subsize = 1
-		request.SubsizeSet = false
-	}
-	if request.Subsize < 1 {
-		log.Println("Subsize Invalid. Ignoring")
-		request.Subsize = 1
-		request.SubsizeSet = false
-	}
-	request.CxmodeSet = true
-	request.Cxmode, ok = GetURLQueryParamString(r, "cxmode")
-	if !ok {
-		request.Cxmode = "Re"
-		request.CxmodeSet = false
-	}
-	var zminSet, zmaxSet bool
-	request.Zmin, zminSet = GetURLQueryParamFloat(r, "zmin")
-	if !zminSet {
-		request.Zmin = 0
-	}
-	request.Zmax, zmaxSet = GetURLQueryParamFloat(r, "zmax")
-	if !zmaxSet {
-		request.Zmax = 0
-	}
-	request.Zset = (zmaxSet && zminSet)
-	request.ColorMap, ok = GetURLQueryParamString(r, "colormap")
-	if !ok {
-		log.Println("colorMap Not Specified.Defaulting to RampColormap")
-		request.ColorMap = "RampColormap"
-	}
-	request.OutputFmt, ok = GetURLQueryParamString(r, "outfmt")
-	if !ok {
-		log.Println("Outformat Not Specified. Setting Equal to Input Format")
-		request.OutputFmt = "RGBA"
+const MaxOutputSize = 4096
 
+func ValidateOutputSize(name string, size int) error {
+	if size < 1 {
+		return fmt.Errorf("%s %d must be >= 1", name, size)
 	}
+	if size > MaxOutputSize {
+		return fmt.Errorf("%s %d must be <= %d", name, size, MaxOutputSize)
+	}
+	return nil
 }
 
-var ZminzmaxFileMap map[string]Zminzmax
+var zminzmaxFileMap = map[string]Zminzmax{}
+var zminzmaxFileMapMu sync.RWMutex
+var zminzmaxComputeMu sync.Mutex
+
+func ResetZminzmaxFileMap() {
+	zminzmaxFileMapMu.Lock()
+	defer zminzmaxFileMapMu.Unlock()
+	zminzmaxFileMap = make(map[string]Zminzmax)
+}
+
+func zminzmaxKey(request *RdsRequest) string {
+	return request.FileName + request.Cxmode
+}
+
+func getCachedZminzmax(request *RdsRequest) (Zminzmax, bool) {
+	zminzmaxFileMapMu.RLock()
+	defer zminzmaxFileMapMu.RUnlock()
+	zminmax, ok := zminzmaxFileMap[zminzmaxKey(request)]
+	return zminmax, ok
+}
+
+func setCachedZminzmax(request *RdsRequest) {
+	zminzmaxFileMapMu.Lock()
+	defer zminzmaxFileMapMu.Unlock()
+	zminzmaxFileMap[zminzmaxKey(request)] = Zminzmax{request.Zmin, request.Zmax}
+}
 
 var DecimationLookup = map[int]int{
 	1:  1,
@@ -189,12 +204,19 @@ type FileMetaData struct {
 }
 
 var IoMutex = &sync.Mutex{}
-var ZMinMaxTileMutex = &sync.Mutex{}
 
 func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 	start := time.Now()
-	ZMinMaxTileMutex.Lock()
-	zminmax, ok := ZminzmaxFileMap[request.FileName+request.Cxmode]
+	zminmax, ok := getCachedZminzmax(request)
+	if ok {
+		request.Zmin = zminmax.Zmin
+		request.Zmax = zminmax.Zmax
+		return
+	}
+
+	zminzmaxComputeMu.Lock()
+	defer zminzmaxComputeMu.Unlock()
+	zminmax, ok = getCachedZminzmax(request)
 	if ok {
 		request.Zmin = zminmax.Zmin
 		request.Zmax = zminmax.Zmax
@@ -219,7 +241,7 @@ func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 			log.Println("Computing Zmax/Zmin on whole file, not previously computed")
 			min := make([]float64, request.FileYSize)
 			max := make([]float64, request.FileYSize)
-			done := make(chan bool, 1)
+			done := make(chan bool, request.FileYSize*2)
 			for line := 0; line < request.FileYSize; line++ {
 				zminmaxRequest.Ystart = line
 				zminmaxRequest.Transform = "min"
@@ -232,13 +254,13 @@ func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 			}
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
-			ZminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
+			setCachedZminzmax(request)
 		} else if request.FileYSize == 1 { //If the file is large but only has one line then we need to break it into section in the x direction.
 			log.Println("Computing Zmax/Zmin on section of 1D file, not previously computed")
 			numSubSections := 4
 			min := make([]float64, numSubSections)
 			max := make([]float64, numSubSections)
-			done := make(chan bool, 1)
+			done := make(chan bool, numSubSections*2)
 			spaceBytes := (float64(request.FileXSize) * bytesPerElement) - float64(maxBytesZminZmax)
 			elementsPerSpace := int(spaceBytes/bytesPerElement) / (numSubSections - 1)
 			elementsPerSection := maxBytesZminZmax / numSubSections
@@ -271,14 +293,14 @@ func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 			}
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
-			ZminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
+			setCachedZminzmax(request)
 
 		} else { // If file is large and has multiple lines then CheckError the first, last, and a number of middles lines
 			numMiddlesLines := int(math.Max(float64((maxBytesZminZmax/request.FileXSize)-2), 0))
 			log.Println("Computing Zmax/Zmin on sampling of file, not previously computed. Number of middle lines:", numMiddlesLines)
 			min := make([]float64, 2+numMiddlesLines)
 			max := make([]float64, 2+numMiddlesLines)
-			done := make(chan bool, 1)
+			done := make(chan bool, (2+numMiddlesLines)*2)
 			numRequested := 0
 			// Process Min and Max of first line
 			zminmaxRequest.Ystart = 0
@@ -312,12 +334,10 @@ func (request *RdsRequest) FindZminMax(maxBytesZminZmax int) {
 			}
 			request.Zmin = floats.Min(min)
 			request.Zmax = floats.Max(max)
-			ZminzmaxFileMap[request.FileName+request.Cxmode] = Zminzmax{request.Zmin, request.Zmax}
+			setCachedZminzmax(request)
 
 		}
 		elapsed := time.Since(start)
 		log.Println("Found Zmin, Zmax to be", request.Zmin, request.Zmax, " in ", elapsed)
-
 	}
-	ZMinMaxTileMutex.Unlock()
 }

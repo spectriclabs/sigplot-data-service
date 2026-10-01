@@ -18,23 +18,37 @@
 package credentials
 
 import (
+	"context"
+	"net/http"
 	"sync"
 	"time"
 )
 
-// STSVersion sts version string
-const STSVersion = "2011-06-15"
+const (
+	// STSVersion sts version string
+	STSVersion = "2011-06-15"
 
-// A Value is the AWS credentials value for individual credential fields.
+	// How much duration to slash from the given expiration duration
+	defaultExpiryWindow = 0.8
+)
+
+// defaultCredContext is used when the credential context doesn't
+// actually matter or the default context is suitable.
+var defaultCredContext = &CredContext{Client: http.DefaultClient}
+
+// A Value is the S3 credentials value for individual credential fields.
 type Value struct {
-	// AWS Access key ID
+	// S3 Access key ID
 	AccessKeyID string
 
-	// AWS Secret Access Key
+	// S3 Secret Access Key
 	SecretAccessKey string
 
-	// AWS Session Token
+	// S3 Session Token
 	SessionToken string
+
+	// Expiration of this credentials - null means no expiration associated
+	Expiration time.Time
 
 	// Signature Type.
 	SignerType SignatureType
@@ -44,13 +58,49 @@ type Value struct {
 // Value. A provider is required to manage its own Expired state, and what to
 // be expired means.
 type Provider interface {
+	// RetrieveWithCredContext returns nil if it successfully retrieved the
+	// value. Error is returned if the value were not obtainable, or empty.
+	// optionally takes CredContext for additional context to retrieve credentials.
+	RetrieveWithCredContext(cc *CredContext) (Value, error)
+
 	// Retrieve returns nil if it successfully retrieved the value.
 	// Error is returned if the value were not obtainable, or empty.
+	//
+	// Deprecated: Retrieve() exists for historical compatibility and should not
+	// be used. To get new credentials use the RetrieveWithCredContext function
+	// to ensure the proper context (i.e. HTTP client) will be used.
 	Retrieve() (Value, error)
 
 	// IsExpired returns if the credentials are no longer valid, and need
 	// to be retrieved.
 	IsExpired() bool
+}
+
+// CredContext is passed to the Retrieve function of a provider to provide
+// some additional context to retrieve credentials.
+type CredContext struct {
+	// Client specifies the HTTP client that should be used if an HTTP
+	// request is to be made to fetch the credentials.
+	Client *http.Client
+
+	// Endpoint specifies the MinIO endpoint that will be used if no
+	// explicit endpoint is provided.
+	Endpoint string
+
+	// Context is the optional caller context. Cancellation and deadlines
+	// on it propagate to the HTTP requests the built-in providers make
+	// to fetch credentials, in addition to any provider-level timeout
+	// bound. A nil Context means no caller cancellation applies.
+	Context context.Context
+}
+
+// requestContext returns the caller context carried by cc, or
+// context.Background() when no Context is set.
+func (cc *CredContext) requestContext() context.Context {
+	if cc.Context == nil {
+		return context.Background()
+	}
+	return cc.Context
 }
 
 // A Expiry provides shared expiration logic to be used by credentials
@@ -60,10 +110,11 @@ type Provider interface {
 // provider's struct.
 //
 // Example:
-//     type IAMCredentialProvider struct {
-//         Expiry
-//         ...
-//     }
+//
+//	type IAMCredentialProvider struct {
+//	    Expiry
+//	    ...
+//	}
 type Expiry struct {
 	// The date/time when to expire on
 	expiration time.Time
@@ -82,10 +133,15 @@ type Expiry struct {
 // the expiration time given to ensure no requests are made with expired
 // tokens.
 func (e *Expiry) SetExpiration(expiration time.Time, window time.Duration) {
-	e.expiration = expiration
-	if window > 0 {
-		e.expiration = e.expiration.Add(-window)
+	if e.CurrentTime == nil {
+		e.CurrentTime = time.Now
 	}
+	cut := window
+	if cut < 0 {
+		expireIn := expiration.Sub(e.CurrentTime())
+		cut = time.Duration(float64(expireIn) * (1 - defaultExpiryWindow))
+	}
+	e.expiration = expiration.Add(-cut)
 }
 
 // IsExpired returns if the credentials are expired.
@@ -132,16 +188,36 @@ func New(provider Provider) *Credentials {
 //
 // If Credentials.Expire() was called the credentials Value will be force
 // expired, and the next call to Get() will cause them to be refreshed.
+//
+// Deprecated: Get() exists for historical compatibility and should not be
+// used. To get new credentials use the Credentials.GetWithContext function
+// to ensure the proper context (i.e. HTTP client) will be used.
 func (c *Credentials) Get() (Value, error) {
+	return c.GetWithContext(nil)
+}
+
+// GetWithContext returns the credentials value, or error if the
+// credentials Value failed to be retrieved.
+//
+// Will return the cached credentials Value if it has not expired. If the
+// credentials Value has expired the Provider's Retrieve() will be called
+// to refresh the credentials.
+//
+// If Credentials.Expire() was called the credentials Value will be force
+// expired, and the next call to Get() will cause them to be refreshed.
+func (c *Credentials) GetWithContext(cc *CredContext) (Value, error) {
 	if c == nil {
 		return Value{}, nil
+	}
+	if cc == nil {
+		cc = defaultCredContext
 	}
 
 	c.Lock()
 	defer c.Unlock()
 
 	if c.isExpired() {
-		creds, err := c.provider.Retrieve()
+		creds, err := c.provider.RetrieveWithCredContext(cc)
 		if err != nil {
 			return Value{}, err
 		}
