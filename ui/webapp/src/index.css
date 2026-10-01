@@ -1,0 +1,667 @@
+:root {
+  color-scheme: dark;
+  --bg: #061014;
+  --surface: rgba(9, 18, 22, 0.78);
+  --surface-raised: rgba(255, 255, 255, 0.05);
+  --hover: rgba(255, 255, 255, 0.06);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e6eef1;
+  --text-muted: #94a6ae;
+  --text-faint: #62747c;
+  --accent: #3fc6d9;
+  --accent-soft: rgba(63, 198, 217, 0.14);
+  --folder: #d4b062;
+  --danger: #ff8a80;
+  --radius: 10px;
+  --topbar-height: 52px;
+  --sidebar-width: 288px;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(180deg, rgba(4, 11, 14, 0.45), rgba(4, 11, 14, 0.7)),
+    url('/sigplot/ui/images/SpectricBackground.jpg');
+  background-size: cover;
+  background-position: center;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+/* ---------- Shell ---------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--topbar-height);
+  padding: 0 12px;
+  background: rgba(5, 12, 15, 0.7);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  color: #062027;
+  background: linear-gradient(135deg, #6fe3f1, #2aa6bb);
+}
+
+.brand h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.workspace {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.app.is-collapsed .workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* ---------- Controls ---------- */
+
+.icon-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background-color 120ms, color 120ms;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.segmented {
+  margin-left: auto;
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  transition: background-color 120ms, color 120ms;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.text-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+/* Namespaced: SigPlot's own spinner element also uses the class "spinner". */
+.sds-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sds-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+/* ---------- Sidebar / file browser ---------- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(14px);
+}
+
+.browser {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.browser-section {
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.select {
+  appearance: none;
+  width: 100%;
+  height: 34px;
+  padding: 0 32px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.05);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a6ae' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  font-size: 13.5px;
+  transition: border-color 120ms;
+}
+
+.select:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.select:disabled {
+  color: var(--text-muted);
+}
+
+.select option {
+  background: #0f1c21;
+  color: var(--text);
+}
+
+.browser-files {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pathbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px 6px 8px;
+}
+
+.crumbs {
+  min-width: 0;
+}
+
+.crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  list-style: none;
+  font-size: 13px;
+}
+
+.crumbs li {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.crumbs li + li::before {
+  content: '/';
+  padding: 0 3px;
+  color: var(--text-faint);
+}
+
+.crumbs button {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.crumbs button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.crumbs button[aria-current] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.search {
+  position: relative;
+  margin: 2px 10px 8px;
+}
+
+.search-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px 0 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  font-size: 13px;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+
+.search-input::placeholder {
+  color: var(--text-faint);
+}
+
+.search-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-input:disabled {
+  opacity: 0.5;
+}
+
+.file-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 6px 6px;
+}
+
+.file-list {
+  list-style: none;
+}
+
+.file-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 100ms;
+}
+
+.file-row:hover {
+  background: var(--hover);
+}
+
+.file-row:focus-visible {
+  outline-offset: -2px;
+}
+
+.file-row-icon {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.file-row.is-dir .file-row-icon {
+  color: var(--folder);
+}
+
+.file-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row-chevron {
+  flex: none;
+  color: var(--text-faint);
+  opacity: 0;
+  transition: opacity 100ms;
+}
+
+.file-row:hover .file-row-chevron,
+.file-row:focus-visible .file-row-chevron {
+  opacity: 1;
+}
+
+.file-row.is-selected {
+  background: var(--accent-soft);
+  color: #fff;
+}
+
+.file-row.is-selected::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.file-row.is-selected .file-row-icon {
+  color: var(--accent);
+}
+
+.browser-footer {
+  flex: none;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.notice {
+  padding: 10px 8px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.notice-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger);
+}
+
+/* ---------- Plots ---------- */
+
+.plots {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.plots-stacked {
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.plots-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.plot-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.plot-card-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.plot-card-title {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.plot-card-title::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.plot-card + .plot-card .plot-card-title::before {
+  background: var(--accent);
+}
+
+.plot-card-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.plot-card-status {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.plot-card-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+}
+
+.plot-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.plot-card-error {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* ---------- Empty state ---------- */
+
+.empty-state {
+  grid-area: 1 / 1 / -1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius);
+  background: rgba(8, 16, 20, 0.35);
+}
+
+.empty-state-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.empty-state-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.empty-state-text {
+  max-width: 34ch;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+
+/* ---------- Narrow screens: sidebar becomes an overlay drawer ---------- */
+
+@media (max-width: 760px) {
+  .workspace,
+  .app.is-collapsed .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: absolute;
+    top: 12px;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    width: min(320px, calc(100% - 24px));
+    background: rgba(9, 18, 22, 0.97);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  }
+
+  .segmented button span {
+    display: none;
+  }
+}

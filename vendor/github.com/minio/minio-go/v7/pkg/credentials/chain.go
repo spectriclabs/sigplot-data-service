@@ -31,18 +31,17 @@ package credentials
 // will cache that Provider for all calls to IsExpired(), until Retrieve is
 // called again after IsExpired() is true.
 //
-//     creds := credentials.NewChainCredentials(
-//         []credentials.Provider{
-//             &credentials.EnvAWSS3{},
-//             &credentials.EnvMinio{},
-//         })
+//	creds := credentials.NewChainCredentials(
+//	    []credentials.Provider{
+//	        &credentials.EnvAWSS3{},
+//	        &credentials.EnvMinio{},
+//	    })
 //
-//     // Usage of ChainCredentials.
-//     mc, err := minio.NewWithCredentials(endpoint, creds, secure, "us-east-1")
-//     if err != nil {
-//          log.Fatalln(err)
-//     }
-//
+//	// Usage of ChainCredentials.
+//	mc, err := minio.NewWithCredentials(endpoint, creds, secure, "us-east-1")
+//	if err != nil {
+//	     log.Fatalln(err)
+//	}
 type Chain struct {
 	Providers []Provider
 	curr      Provider
@@ -54,6 +53,24 @@ func NewChainCredentials(providers []Provider) *Credentials {
 	return New(&Chain{
 		Providers: append([]Provider{}, providers...),
 	})
+}
+
+// RetrieveWithCredContext is like Retrieve with CredContext
+func (c *Chain) RetrieveWithCredContext(cc *CredContext) (Value, error) {
+	for _, p := range c.Providers {
+		creds, _ := p.RetrieveWithCredContext(cc)
+		// Always prioritize non-anonymous providers, if any.
+		if creds.AccessKeyID == "" && creds.SecretAccessKey == "" {
+			continue
+		}
+		c.curr = p
+		return creds, nil
+	}
+	// At this point we have exhausted all the providers and
+	// are left without any credentials return anonymous.
+	return Value{
+		SignerType: SignatureAnonymous,
+	}, nil
 }
 
 // Retrieve returns the credentials value, returns no credentials(anonymous)

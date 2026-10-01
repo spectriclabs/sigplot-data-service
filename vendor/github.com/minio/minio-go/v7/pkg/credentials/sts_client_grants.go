@@ -1,6 +1,6 @@
 /*
  * MinIO Go Library for Amazon S3 Compatible Cloud Storage
- * Copyright 2019 MinIO, Inc.
+ * Copyright 2019-2022 MinIO, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,15 @@
 package credentials
 
 import (
+	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -69,7 +73,8 @@ type ClientGrantsToken struct {
 type STSClientGrants struct {
 	Expiry
 
-	// Required http Client to use when connecting to MinIO STS service.
+	// Optional http Client to use when connecting to MinIO STS service.
+	// (overrides default client in CredContext)
 	Client *http.Client
 
 	// MinIO endpoint to fetch STS credentials.
@@ -87,24 +92,18 @@ type STSClientGrants struct {
 // NewSTSClientGrants returns a pointer to a new
 // Credentials object wrapping the STSClientGrants.
 func NewSTSClientGrants(stsEndpoint string, getClientGrantsTokenExpiry func() (*ClientGrantsToken, error)) (*Credentials, error) {
-	if stsEndpoint == "" {
-		return nil, errors.New("STS endpoint cannot be empty")
-	}
 	if getClientGrantsTokenExpiry == nil {
 		return nil, errors.New("Client grants access token and expiry retrieval function should be defined")
 	}
 	return New(&STSClientGrants{
-		Client: &http.Client{
-			Transport: http.DefaultTransport,
-		},
 		STSEndpoint:                stsEndpoint,
 		GetClientGrantsTokenExpiry: getClientGrantsTokenExpiry,
 	}), nil
 }
 
-func getClientGrantsCredentials(clnt *http.Client, endpoint string,
-	getClientGrantsTokenExpiry func() (*ClientGrantsToken, error)) (AssumeRoleWithClientGrantsResponse, error) {
-
+func getClientGrantsCredentials(ctx context.Context, clnt *http.Client, endpoint string,
+	getClientGrantsTokenExpiry func() (*ClientGrantsToken, error),
+) (AssumeRoleWithClientGrantsResponse, error) {
 	accessToken, err := getClientGrantsTokenExpiry()
 	if err != nil {
 		return AssumeRoleWithClientGrantsResponse{}, err
@@ -120,19 +119,36 @@ func getClientGrantsCredentials(clnt *http.Client, endpoint string,
 	if err != nil {
 		return AssumeRoleWithClientGrantsResponse{}, err
 	}
-	u.RawQuery = v.Encode()
 
-	req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), strings.NewReader(v.Encode()))
 	if err != nil {
 		return AssumeRoleWithClientGrantsResponse{}, err
 	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
 	resp, err := clnt.Do(req)
 	if err != nil {
 		return AssumeRoleWithClientGrantsResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return AssumeRoleWithClientGrantsResponse{}, errors.New(resp.Status)
+		var errResp ErrorResponse
+		buf, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return AssumeRoleWithClientGrantsResponse{}, err
+		}
+		_, err = xmlDecodeAndBody(bytes.NewReader(buf), &errResp)
+		if err != nil {
+			var s3Err Error
+			if _, err = xmlDecodeAndBody(bytes.NewReader(buf), &s3Err); err != nil {
+				return AssumeRoleWithClientGrantsResponse{}, err
+			}
+			errResp.RequestID = s3Err.RequestID
+			errResp.STSError.Code = s3Err.Code
+			errResp.STSError.Message = s3Err.Message
+		}
+		return AssumeRoleWithClientGrantsResponse{}, errResp
 	}
 
 	a := AssumeRoleWithClientGrantsResponse{}
@@ -142,10 +158,29 @@ func getClientGrantsCredentials(clnt *http.Client, endpoint string,
 	return a, nil
 }
 
-// Retrieve retrieves credentials from the MinIO service.
-// Error will be returned if the request fails.
-func (m *STSClientGrants) Retrieve() (Value, error) {
-	a, err := getClientGrantsCredentials(m.Client, m.STSEndpoint, m.GetClientGrantsTokenExpiry)
+// RetrieveWithCredContext is like Retrieve() with cred context
+func (m *STSClientGrants) RetrieveWithCredContext(cc *CredContext) (Value, error) {
+	if cc == nil {
+		cc = defaultCredContext
+	}
+
+	client := m.Client
+	if client == nil {
+		client = cc.Client
+	}
+	if client == nil {
+		client = defaultCredContext.Client
+	}
+
+	stsEndpoint := m.STSEndpoint
+	if stsEndpoint == "" {
+		stsEndpoint = cc.Endpoint
+	}
+	if stsEndpoint == "" {
+		return Value{}, errors.New("STS endpoint unknown")
+	}
+
+	a, err := getClientGrantsCredentials(cc.requestContext(), client, stsEndpoint, m.GetClientGrantsTokenExpiry)
 	if err != nil {
 		return Value{}, err
 	}
@@ -157,6 +192,13 @@ func (m *STSClientGrants) Retrieve() (Value, error) {
 		AccessKeyID:     a.Result.Credentials.AccessKey,
 		SecretAccessKey: a.Result.Credentials.SecretKey,
 		SessionToken:    a.Result.Credentials.SessionToken,
+		Expiration:      a.Result.Credentials.Expiration,
 		SignerType:      SignatureV4,
 	}, nil
+}
+
+// Retrieve retrieves credentials from the MinIO service.
+// Error will be returned if the request fails.
+func (m *STSClientGrants) Retrieve() (Value, error) {
+	return m.RetrieveWithCredContext(nil)
 }

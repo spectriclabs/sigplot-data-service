@@ -23,57 +23,15 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"sync"
 
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 	"github.com/minio/minio-go/v7/pkg/signer"
 )
 
-// bucketLocationCache - Provides simple mechanism to hold bucket
-// locations in memory.
-type bucketLocationCache struct {
-	// mutex is used for handling the concurrent
-	// read/write requests for cache.
-	sync.RWMutex
-
-	// items holds the cached bucket locations.
-	items map[string]string
-}
-
-// newBucketLocationCache - Provides a new bucket location cache to be
-// used internally with the client object.
-func newBucketLocationCache() *bucketLocationCache {
-	return &bucketLocationCache{
-		items: make(map[string]string),
-	}
-}
-
-// Get - Returns a value of a given key if it exists.
-func (r *bucketLocationCache) Get(bucketName string) (location string, ok bool) {
-	r.RLock()
-	defer r.RUnlock()
-	location, ok = r.items[bucketName]
-	return
-}
-
-// Set - Will persist a value into cache.
-func (r *bucketLocationCache) Set(bucketName string, location string) {
-	r.Lock()
-	defer r.Unlock()
-	r.items[bucketName] = location
-}
-
-// Delete - Deletes a bucket name from cache.
-func (r *bucketLocationCache) Delete(bucketName string) {
-	r.Lock()
-	defer r.Unlock()
-	delete(r.items, bucketName)
-}
-
 // GetBucketLocation - get location for the bucket name from location cache, if not
 // fetch freshly by making a new request.
-func (c Client) GetBucketLocation(ctx context.Context, bucketName string) (string, error) {
+func (c *Client) GetBucketLocation(ctx context.Context, bucketName string) (string, error) {
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return "", err
 	}
@@ -82,7 +40,7 @@ func (c Client) GetBucketLocation(ctx context.Context, bucketName string) (strin
 
 // getBucketLocation - Get location for the bucketName from location map cache, if not
 // fetch freshly by making a new request.
-func (c Client) getBucketLocation(ctx context.Context, bucketName string) (string, error) {
+func (c *Client) getBucketLocation(ctx context.Context, bucketName string) (string, error) {
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return "", err
 	}
@@ -118,30 +76,35 @@ func (c Client) getBucketLocation(ctx context.Context, bucketName string) (strin
 
 // processes the getBucketLocation http response from the server.
 func processBucketLocationResponse(resp *http.Response, bucketName string) (bucketLocation string, err error) {
-	if resp != nil {
-		if resp.StatusCode != http.StatusOK {
-			err = httpRespToErrorResponse(resp, bucketName, "")
-			errResp := ToErrorResponse(err)
-			// For access denied error, it could be an anonymous
-			// request. Move forward and let the top level callers
-			// succeed if possible based on their policy.
-			switch errResp.Code {
-			case "NotImplemented":
-				if errResp.Server == "AmazonSnowball" {
-					return "snowball", nil
-				}
-			case "AuthorizationHeaderMalformed":
-				fallthrough
-			case "InvalidRegion":
-				fallthrough
-			case "AccessDenied":
-				if errResp.Region == "" {
-					return "us-east-1", nil
-				}
-				return errResp.Region, nil
+	if resp == nil {
+		return "", errInvalidArgument("Empty http response. " + reportIssue)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		err = httpRespToErrorResponse(resp, bucketName, "")
+		errResp := ToErrorResponse(err)
+		// For access denied error, it could be an anonymous
+		// request. Move forward and let the top level callers
+		// succeed if possible based on their policy.
+		switch errResp.Code {
+		case NotImplemented:
+			switch errResp.Server {
+			case "AmazonSnowball":
+				return "snowball", nil
+			case "cloudflare":
+				return "us-east-1", nil
 			}
-			return "", err
+		case AuthorizationHeaderMalformed:
+			fallthrough
+		case InvalidRegion:
+			fallthrough
+		case AccessDenied:
+			if errResp.Region == "" {
+				return "us-east-1", nil
+			}
+			return errResp.Region, nil
 		}
+		return "", err
 	}
 
 	// Extract location.
@@ -169,7 +132,7 @@ func processBucketLocationResponse(resp *http.Response, bucketName string) (buck
 }
 
 // getBucketLocationRequest - Wrapper creates a new getBucketLocation request.
-func (c Client) getBucketLocationRequest(ctx context.Context, bucketName string) (*http.Request, error) {
+func (c *Client) getBucketLocationRequest(ctx context.Context, bucketName string) (*http.Request, error) {
 	// Set location query.
 	urlValues := make(url.Values)
 	urlValues.Set("location", "")
@@ -181,15 +144,17 @@ func (c Client) getBucketLocationRequest(ctx context.Context, bucketName string)
 	if h, p, err := net.SplitHostPort(targetURL.Host); err == nil {
 		if targetURL.Scheme == "http" && p == "80" || targetURL.Scheme == "https" && p == "443" {
 			targetURL.Host = h
+			if ip := net.ParseIP(h); ip != nil && ip.To4() == nil {
+				targetURL.Host = "[" + h + "]"
+			}
 		}
 	}
 
-	isVirtualHost := s3utils.IsVirtualHostSupported(targetURL, bucketName)
+	isVirtualStyle := c.isVirtualHostStyleRequest(targetURL, bucketName)
 
 	var urlStr string
 
-	//only support Aliyun OSS for virtual hosted path,  compatible  Amazon & Google Endpoint
-	if isVirtualHost && s3utils.IsAliyunOSSEndpoint(targetURL) {
+	if isVirtualStyle {
 		urlStr = c.endpointURL.Scheme + "://" + bucketName + "." + targetURL.Host + "/?location"
 	} else {
 		targetURL.Path = path.Join(bucketName, "") + "/"
@@ -207,7 +172,7 @@ func (c Client) getBucketLocationRequest(ctx context.Context, bucketName string)
 	c.setUserAgent(req)
 
 	// Get credentials from the configured credentials provider.
-	value, err := c.credsProvider.Get()
+	value, err := c.credsProvider.GetWithContext(c.credContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -235,9 +200,7 @@ func (c Client) getBucketLocationRequest(ctx context.Context, bucketName string)
 	}
 
 	if signerType.IsV2() {
-		// Get Bucket Location calls should be always path style
-		isVirtualHost := false
-		req = signer.SignV2(*req, accessKeyID, secretAccessKey, isVirtualHost)
+		req = signer.SignV2(*req, accessKeyID, secretAccessKey, isVirtualStyle)
 		return req, nil
 	}
 
@@ -248,6 +211,11 @@ func (c Client) getBucketLocationRequest(ctx context.Context, bucketName string)
 	}
 
 	req.Header.Set("X-Amz-Content-Sha256", contentSha256)
-	req = signer.SignV4(*req, accessKeyID, secretAccessKey, sessionToken, "us-east-1")
+	if s3utils.IsAmazonOutpostsEndpoint(*c.endpointURL) {
+		region := getDefaultLocation(*c.endpointURL, c.region)
+		req = signer.SignV4Outposts(*req, accessKeyID, secretAccessKey, sessionToken, region)
+	} else {
+		req = signer.SignV4(*req, accessKeyID, secretAccessKey, sessionToken, "us-east-1")
+	}
 	return req, nil
 }

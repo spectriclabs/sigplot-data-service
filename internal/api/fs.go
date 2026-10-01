@@ -4,9 +4,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/labstack/echo/v4"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/spectriclabs/sigplot-data-service/internal/bluefile"
 	"github.com/spectriclabs/sigplot-data-service/internal/config"
 	"github.com/spectriclabs/sigplot-data-service/internal/sds"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -15,12 +17,20 @@ import (
 	"strings"
 )
 
+type safeFileLocation struct {
+	LocationName string `json:"location_name"`
+	LocationType string `json:"location_type"`
+}
+
 func (a *API) GetBluefileHeader(c echo.Context) error {
 	filePath := c.Param("*")
 	locationName := c.Param("location")
 	reader, err := sds.OpenDataSource(a.Cfg, a.Cache, locationName, filePath)
 	if err != nil {
-		return err
+		return c.String(http.StatusBadRequest, err.Error())
+	}
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
 	}
 
 	if strings.Contains(filePath, ".tmp") || strings.Contains(filePath, ".prm") {
@@ -79,17 +89,16 @@ func (a *API) GetFileContents(c echo.Context, locationName string, filePath stri
 	reader, err := sds.OpenDataSource(a.Cfg, a.Cache, locationName, filePath)
 	if err != nil {
 		c.Logger().Error(err)
+		if sds.IsInvalidPath(err) {
+			return c.String(http.StatusBadRequest, err.Error())
+		}
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
-
-	var contentType string
-	if strings.Contains(filePath, ".tmp") || strings.Contains(filePath, ".prm") {
-		contentType = "application/bluefile"
-	} else {
-		contentType = "application/binary"
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
 	}
 
-	return c.Stream(http.StatusOK, contentType, reader)
+	return c.Stream(http.StatusOK, sds.ContentTypeForPath(filePath), reader)
 }
 
 func (a *API) GetDirectoryContents(c echo.Context, directoryPath string) error {
@@ -113,7 +122,14 @@ func (a *API) GetDirectoryContents(c echo.Context, directoryPath string) error {
 }
 
 func (a *API) GetFileLocations(c echo.Context) error {
-	return c.JSON(200, a.Cfg.LocationDetails)
+	locations := make([]safeFileLocation, 0, len(a.Cfg.LocationDetails))
+	for _, location := range a.Cfg.LocationDetails {
+		locations = append(locations, safeFileLocation{
+			LocationName: location.LocationName,
+			LocationType: location.LocationType,
+		})
+	}
+	return c.JSON(200, locations)
 }
 
 func (a *API) GetFileOrDirectory(c echo.Context) error {
@@ -138,30 +154,90 @@ func (a *API) GetFileOrDirectory(c echo.Context) error {
 		return c.String(http.StatusBadRequest, err.Error())
 	}
 
-	// TODO: Add support for listing contents of MinIO bucket?
-	if currentLocation.LocationType != "localFile" {
-		err := fmt.Errorf("listing files only supported for localFile location types: %s provided", currentLocation.LocationType)
+	switch currentLocation.LocationType {
+	case "localFile":
+		joinedFilePath, err := sds.ResolvePath(currentLocation.Path, filePath)
+		if err != nil {
+			return c.String(http.StatusBadRequest, err.Error())
+		}
+
+		// Make sure the joined path exists
+		fi, err := os.Stat(joinedFilePath)
+		if err != nil {
+			err := fmt.Errorf("error reading path %s: %s", joinedFilePath, err)
+			return c.String(http.StatusBadRequest, err.Error())
+		}
+
+		// If the URL is to a file, use raw mode to return file contents
+		mode := fi.Mode()
+		if mode.IsRegular() {
+			c.Logger().Info("Path is a file; returning contents in raw mode")
+			return a.GetFileContents(c, locationName, filePath)
+		} else {
+			// Otherwise, it is likely a directory
+			c.Logger().Info("Path is a directory; returning directory listing")
+			return a.GetDirectoryContents(c, joinedFilePath)
+		}
+
+	case "minio":
+		objectKey, err := sds.ResolveObjectKey(currentLocation.Path, filePath)
+		if err != nil {
+			return c.String(http.StatusBadRequest, err.Error())
+		}
+		prefix, err := sds.ObjectListPrefix(currentLocation.Path, filePath)
+		if err != nil {
+			return c.String(http.StatusBadRequest, err.Error())
+		}
+		minioClient, err := sds.MinioClientForLocation(currentLocation)
+		if err != nil {
+			log.Println("Error establishing connection to MinIO", err)
+			return c.String(http.StatusInternalServerError, err.Error())
+		}
+
+		ctx := c.Request().Context()
+
+		// If filePath is non-empty, try to get it as a file first
+		if filePath != "" && !strings.HasSuffix(filePath, "/") {
+			objectFd, err := minioClient.GetObject(ctx, currentLocation.MinioBucket, objectKey, minio.GetObjectOptions{})
+			if err == nil {
+				_, statErr := objectFd.Stat()
+				if statErr == nil {
+					defer objectFd.Close()
+					return c.Stream(http.StatusOK, sds.ContentTypeForPath(filePath), objectFd)
+				}
+				objectFd.Close()
+			}
+		}
+		// List directory contents
+		objectCh := minioClient.ListObjects(ctx, currentLocation.MinioBucket, minio.ListObjectsOptions{
+			Prefix:    prefix,
+			Recursive: false,
+		})
+
+		filelist := []sds.File{}
+		for object := range objectCh {
+			if object.Err != nil {
+				log.Println("Error listing MinIO objects", object.Err)
+				return c.String(http.StatusInternalServerError, object.Err.Error())
+			}
+			if object.Key == prefix {
+				continue
+			}
+			var f sds.File
+			name := path.Base(strings.TrimSuffix(object.Key, "/"))
+			f.Filename = name
+			if strings.HasSuffix(object.Key, "/") {
+				f.Type = "directory"
+			} else {
+				f.Type = "file"
+			}
+			filelist = append(filelist, f)
+		}
+
+		return c.JSON(http.StatusOK, filelist)
+
+	default:
+		err := fmt.Errorf("listing files not supported for location type: %s", currentLocation.LocationType)
 		return c.String(http.StatusBadRequest, err.Error())
-	}
-
-	// Join the provided file path with the configured path
-	joinedFilePath := path.Join(currentLocation.Path, filePath)
-
-	// Make sure the joined path exists
-	fi, err := os.Stat(joinedFilePath)
-	if err != nil {
-		err := fmt.Errorf("error reading path %s: %s", joinedFilePath, err)
-		return c.String(http.StatusBadRequest, err.Error())
-	}
-
-	// If the URL is to a file, use raw mode to return file contents
-	mode := fi.Mode()
-	if mode.IsRegular() {
-		c.Logger().Info("Path is a file; returning contents in raw mode")
-		return a.GetFileContents(c, locationName, filePath)
-	} else {
-		// Otherwise, it is likely a directory
-		c.Logger().Info("Path is a directory; returning directory listing")
-		return a.GetDirectoryContents(c, joinedFilePath)
 	}
 }

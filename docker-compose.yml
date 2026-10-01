@@ -1,0 +1,50 @@
+services:
+  minio:
+    image: elestio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniostorage
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Creates the default bucket on startup
+  minio-init:
+    image: elestio/minio:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./tests/data:/data:ro
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minio miniostorage;
+      mc mb --ignore-existing local/sdsdata;
+      mc cp --recursive /data/ local/sdsdata/;
+      echo 'Bucket sdsdata ready with example files:';
+      mc ls local/sdsdata/;
+      "
+
+  sds:
+    build: .
+    image: sds:0.7
+    ports:
+      - "5055:5055"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./sds_config_docker.json:/opt/sds/sds_config.json:ro
+      - sds-cache:/opt/sds/sdscache
+
+volumes:
+  minio-data:
+  sds-cache:

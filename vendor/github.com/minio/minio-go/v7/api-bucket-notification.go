@@ -21,18 +21,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"net/http"
 	"net/url"
 	"time"
 
-	jsoniter "github.com/json-iterator/go"
 	"github.com/minio/minio-go/v7/pkg/notification"
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
 
 // SetBucketNotification saves a new bucket notification with a context to control cancellations and timeouts.
-func (c Client) SetBucketNotification(ctx context.Context, bucketName string, config notification.Configuration) error {
+func (c *Client) SetBucketNotification(ctx context.Context, bucketName string, config notification.Configuration) error {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return err
@@ -73,12 +73,12 @@ func (c Client) SetBucketNotification(ctx context.Context, bucketName string, co
 }
 
 // RemoveAllBucketNotification - Remove bucket notification clears all previously specified config
-func (c Client) RemoveAllBucketNotification(ctx context.Context, bucketName string) error {
+func (c *Client) RemoveAllBucketNotification(ctx context.Context, bucketName string) error {
 	return c.SetBucketNotification(ctx, bucketName, notification.Configuration{})
 }
 
 // GetBucketNotification returns current bucket notification configuration
-func (c Client) GetBucketNotification(ctx context.Context, bucketName string) (bucketNotification notification.Configuration, err error) {
+func (c *Client) GetBucketNotification(ctx context.Context, bucketName string) (bucketNotification notification.Configuration, err error) {
 	// Input validation.
 	if err := s3utils.CheckValidBucketName(bucketName); err != nil {
 		return notification.Configuration{}, err
@@ -87,7 +87,7 @@ func (c Client) GetBucketNotification(ctx context.Context, bucketName string) (b
 }
 
 // Request server for notification rules.
-func (c Client) getBucketNotification(ctx context.Context, bucketName string) (notification.Configuration, error) {
+func (c *Client) getBucketNotification(ctx context.Context, bucketName string) (notification.Configuration, error) {
 	urlValues := make(url.Values)
 	urlValues.Set("notification", "")
 
@@ -103,7 +103,6 @@ func (c Client) getBucketNotification(ctx context.Context, bucketName string) (n
 		return notification.Configuration{}, err
 	}
 	return processBucketNotificationResponse(bucketName, resp)
-
 }
 
 // processes the GetNotification http response from the server.
@@ -121,12 +120,12 @@ func processBucketNotificationResponse(bucketName string, resp *http.Response) (
 }
 
 // ListenNotification listen for all events, this is a MinIO specific API
-func (c Client) ListenNotification(ctx context.Context, prefix, suffix string, events []string) <-chan notification.Info {
+func (c *Client) ListenNotification(ctx context.Context, prefix, suffix string, events []string) <-chan notification.Info {
 	return c.ListenBucketNotification(ctx, "", prefix, suffix, events)
 }
 
 // ListenBucketNotification listen for bucket events, this is a MinIO specific API
-func (c Client) ListenBucketNotification(ctx context.Context, bucketName, prefix, suffix string, events []string) <-chan notification.Info {
+func (c *Client) ListenBucketNotification(ctx context.Context, bucketName, prefix, suffix string, events []string) <-chan notification.Info {
 	notificationInfoCh := make(chan notification.Info, 1)
 	const notificationCapacity = 4 * 1024 * 1024
 	notificationEventBuffer := make([]byte, notificationCapacity)
@@ -158,21 +157,15 @@ func (c Client) ListenBucketNotification(ctx context.Context, bucketName, prefix
 			return
 		}
 
-		// Continuously run and listen on bucket notification.
-		// Create a done channel to control 'ListObjects' go routine.
-		retryDoneCh := make(chan struct{}, 1)
-
-		// Indicate to our routine to exit cleanly upon return.
-		defer close(retryDoneCh)
-
 		// Prepare urlValues to pass into the request on every loop
 		urlValues := make(url.Values)
+		urlValues.Set("ping", "10")
 		urlValues.Set("prefix", prefix)
 		urlValues.Set("suffix", suffix)
 		urlValues["events"] = events
 
 		// Wait on the jitter retry loop.
-		for range c.newRetryTimerContinous(time.Second, time.Second*30, MaxJitter, retryDoneCh) {
+		for range c.newRetryTimerContinous(time.Second, time.Second*30, MaxJitter) {
 			// Execute GET on bucket to list objects.
 			resp, err := c.executeMethod(ctx, http.MethodGet, requestMetadata{
 				bucketName:       bucketName,
@@ -207,7 +200,6 @@ func (c Client) ListenBucketNotification(ctx context.Context, bucketName, prefix
 			// Use a higher buffer to support unexpected
 			// caching done by proxies
 			bio.Buffer(notificationEventBuffer, notificationCapacity)
-			var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 			// Unmarshal each line, returns marshaled values.
 			for bio.Scan() {
@@ -225,6 +217,12 @@ func (c Client) ListenBucketNotification(ctx context.Context, bucketName, prefix
 					closeResponse(resp)
 					continue
 				}
+
+				// Empty events pinged from the server
+				if len(notificationInfo.Records) == 0 && notificationInfo.Err == nil {
+					continue
+				}
+
 				// Send notificationInfo
 				select {
 				case notificationInfoCh <- notificationInfo:
@@ -246,7 +244,6 @@ func (c Client) ListenBucketNotification(ctx context.Context, bucketName, prefix
 
 			// Close current connection before looping further.
 			closeResponse(resp)
-
 		}
 	}(notificationInfoCh)
 
